@@ -26,7 +26,7 @@ func uso()
     Print "  dashgit cat-file (-t | -s | -p | tipo) objeto"
     Print "  dashgit config [--global] clave [valor]"
     Print "  dashgit add (fichero | cajón | . | -A)..."
-    Print "  dashgit rm [--cached] fichero..."
+    Print "  dashgit rm [-r] [-f] [--cached] fichero..."
     Print "  dashgit status [-s]"
     Print "  dashgit commit [-a] -m mensaje"
     Print "  dashgit log [--oneline] [-n N] [desde]"

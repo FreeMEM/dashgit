@@ -86,3 +86,6 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   los dos padres; `merge --abort`. El árbol fusionado es el mismo que da git. `pull` fusiona cuando los dos lados
   tienen commits. En FS-UAE, desde el noveno programa con red de un mismo arranque ya no se abre bsdsocket.library
   (pasado a la sesión de Dash): por eso la parte nueva de `tests/fase4.sh` (pull que fusiona y su push) falla allí.
+- 2026-11-04: `rm` como git: sin `-r` no borra cajones; si algún fichero tiene cambios sin commit (en el disco o
+  añadidos), no borra nada salvo con `-f` (con `--cached` solo se niega si hay de los dos); una ruta que no está
+  hace que no se borre nada; quita los cajones que quedan vacíos. Antes borraba sin mirar: se podía perder trabajo.

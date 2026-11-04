@@ -49,12 +49,19 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   r "status -s"                 # 02
   r "commit -m todo"            # 03
   r "status -s"                 # 04
-  r "rm hondo"                  # 05
-  r "commit -m sin-hondo"       # 06
-  r "checkout -b vuelta HEAD"   # 07  (rama nueva en el commit sin hondo)
-  r "checkout main"             # 08
-  r "log --oneline"             # 09
-  r "status -s"                 # 10
+  r "rm hondo"                  # 05  sin -r: no
+  r "rm -r hondo"               # 06
+  r "commit -m sin-hondo"       # 07
+  r "checkout -b vuelta HEAD"   # 08
+  r "checkout main"             # 09
+  r "log --oneline"             # 10
+  r "status -s"                 # 11
+  echo "Echo \"cambiado\" >a"
+  r "rm a"                      # 12  con cambios: no
+  r "rm a.b noexiste"           # 13  uno que no está: no se borra nada
+  r "rm --cached a.b"           # 14  sale del índice, queda en el disco
+  r "rm -f a"                   # 15  con cambios, forzado
+  r "status -s"                 # 16
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-500} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -85,8 +92,15 @@ cd "$d/P"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5 || true
 [ -z "$(ver 04)" ] && bien "limpio tras el commit" || { mal "status tras commit:"; ver 04; }
 [ ! -e "$d/P/hondo" ] && bien "rm quita el cajón" || { mal "queda el cajón hondo:"; find "$d/P/hondo"; }
-[ -z "$(ver 10)" ] && bien "limpio al final" || { mal "status al final:"; ver 10; }
-[ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git -c core.quotepath=off status --porcelain | head; }
+grep -q "sin -r" "$d/R/05.txt" && [ -e "$tmp/sys/P/hondo" ] && bien "rm de un cajón pide -r" || { mal "rm sin -r:"; ver 05; }
+[ -z "$(ver 11)" ] && bien "limpio tras volver" || { mal "status tras volver:"; ver 11; }
+ver 12 | grep -q "cambios que se perderían" && bien "rm se niega con cambios" || { mal "rm con cambios:"; ver 12; }
+grep -q "no se ha borrado nada" "$d/R/13.txt" && bien "rm con una ruta mala no borra nada" || { mal "rm con ruta mala:"; ver 13; }
+[ -e "$d/P/a.b" ] && bien "rm --cached deja el fichero" || mal "rm --cached borró el fichero"
+[ ! -e "$d/P/a" ] && bien "rm -f borra" || mal "rm -f no borró"
+[ "$(ver 16)" = "$(printf 'D  a\nD  a.b\n?? a.b')" ] && bien "status tras los rm" || { mal "status tras los rm:"; ver 16; }
+git -c core.quotepath=off status --porcelain > "$tmp/gs.txt"
+[ "$(cat "$tmp/gs.txt")" = "$(printf 'D  a\nD  a.b\n?? a.b')" ] && bien "git status igual" || { mal "git status:"; cat "$tmp/gs.txt"; }
 cmp -s "$d/P/binario.bin" "$tmp/sys/P/binario.bin" && bien "binario intacto" || mal "binario"
 [ "$(git cat-file -p main~1:sin_salto.txt)" = "no acaba en salto" ] && bien "sin salto final" || mal "sin salto final"
 [ $fallos -eq 0 ] && echo "TODO BIEN"

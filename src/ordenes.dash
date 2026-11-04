@@ -166,39 +166,116 @@ end
 
 func orden_rm(args: [String])
     solo_indice = false
+    recursivo = false
+    forzar = false
     var rutas: [String] = []
+    var escritas: [String] = []
     for a in args
         if a == "--cached"
             solo_indice = true
-        elif a != "-r" and a != "-f"
+        elif a == "-r"
+            recursivo = true
+        elif a == "-f" or a == "--force"
+            forzar = true
+        elif a == "-rf" or a == "-fr"
+            recursivo = true
+            forzar = true
+        elif a != "--"
             rutas.push(ruta_git(a))
+            escritas.push(a)
         end
+    end
+    if rutas.length == 0
+        aviso("uso: rm [-r] [-f] [--cached] fichero...")
+        return
     end
     var idx: [EntradaIndice] = indice_leer()
     if idx == nil
         aviso(indice_error)
         return
     end
-    for r in rutas
+    # primero se mira todo; si algo no se puede, no se borra nada (como git)
+    var quitar: {String: Int} = {}
+    k = 0
+    while k < rutas.length
+        r = rutas[k]
         hallado = false
-        i = idx.length - 1
-        while i >= 0
-            if dentro_de(idx[i].ruta, r)
+        for e in idx
+            if dentro_de(e.ruta, r)
                 hallado = true
-                Print "rm '" + utf8_to_latin1(idx[i].ruta) + "'"
-                if not solo_indice
-                    file_delete(ruta_amiga(idx[i].ruta))
-                    _quitar_cajones_vacios(ruta_padre(ruta_amiga(idx[i].ruta)))
+                if e.ruta != r and not recursivo
+                    aviso("no se borra '" + escritas[k] + "' sin -r (es un cajón)")
+                    return
                 end
-                idx.remove(i)
+                quitar[e.ruta] = 1
             end
-            i = i - 1
         end
         if not hallado
-            aviso(utf8_to_latin1(r) + " no está en el índice")
+            aviso("'" + escritas[k] + "' no encaja con ningún fichero del índice; no se ha borrado nada")
+            return
+        end
+        k = k + 1
+    end
+    if not forzar
+        var cab: [EntradaIndice] = ficheros_de_commit(head_id())
+        var en_cab: {String: String} = {}
+        if cab != nil
+            for e in cab
+                en_cab[e.ruta] = e.id
+            end
+        end
+        var mal: [String] = []
+        for e in idx
+            if quitar.get(e.ruta, 0) == 1 and e.etapa == 0
+                preparado = en_cab.get(e.ruta, "") != e.id
+                cambiado = false
+                f = trabajo_mirar(e.ruta)
+                if f.tam >= 0 and (f.tam != e.tam or f.mtime != e.mtime)
+                    cambiado = trabajo_guardar(e.ruta, false) != e.id
+                end
+                if solo_indice
+                    if preparado and cambiado
+                        mal.push(e.ruta + " (cambios añadidos y otros sin añadir)")
+                    end
+                elif preparado
+                    mal.push(e.ruta + " (cambios añadidos sin commit)")
+                elif cambiado
+                    mal.push(e.ruta + " (cambios sin commit)")
+                end
+            end
+        end
+        if mal.length > 0
+            aviso("no se ha borrado nada; estos ficheros tienen cambios que se perderían:")
+            for m in mal
+                Print "        " + utf8_to_latin1(m)
+            end
+            Print "Haz commit de ellos, o usa --cached para dejarlos en el disco, o -f para borrarlos igualmente."
+            return
         end
     end
-    indice_escribir(idx)
+    # ahora sí
+    var queda: [EntradaIndice] = []
+    var borradas: [String] = []
+    for e in idx
+        if quitar.get(e.ruta, 0) == 1
+            if borradas.length == 0 or borradas[borradas.length - 1] != e.ruta
+                borradas.push(e.ruta)
+            end
+        else
+            queda.push(e)
+        end
+    end
+    for r in borradas
+        Print "rm '" + utf8_to_latin1(r) + "'"
+        if not solo_indice
+            ruta = ruta_amiga(r)
+            if file_exists(ruta) and not file_delete(ruta)
+                aviso("no se pudo borrar " + ruta + " del disco (¿protegido contra borrado?)")
+            end
+            _quitar_cajones_vacios(ruta_padre(ruta))
+        end
+    end
+    indice_escribir(queda)
 end
 
 # ---- status ----
