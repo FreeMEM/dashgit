@@ -147,6 +147,33 @@ func resolver(nombre: String) -> String
     return ""
 end
 
+# Como resolver, pero llevando una etiqueta anotada (objeto "tag") al commit al que apunta; "" si no da un commit
+func resolver_commit(nombre: String) -> String
+    id = resolver(nombre)
+    vueltas = 0
+    while id != "" and vueltas < 10
+        o = objeto_leer(id)
+        if o == nil
+            return ""
+        end
+        t = o.tipo
+        siguiente = ""
+        if t == "tag"
+            siguiente = commit_campo(o, "object")
+        end
+        objeto_libre(o)
+        if t == "commit"
+            return id
+        end
+        if t != "tag"
+            return ""
+        end
+        id = siguiente
+        vueltas = vueltas + 1
+    end
+    return ""
+end
+
 # ---- configuración (.git/config, formato ini) ----
 
 # "user.name" a ("user", "name"); "remote.origin.url" a ('remote "origin"', "url"). La sección, en minúsculas

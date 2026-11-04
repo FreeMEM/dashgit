@@ -601,7 +601,7 @@ func orden_merge(args: [String])
         return
     end
     nombre = args[0]
-    suyo = resolver(nombre)
+    suyo = resolver_commit(nombre)
     if suyo == ""
         aviso("no existe " + nombre)
         return
@@ -619,8 +619,8 @@ func orden_merge_base(args: [String])
         aviso("uso: merge-base commit commit")
         return
     end
-    a = resolver(args[0])
-    b = resolver(args[1])
+    a = resolver_commit(args[0])
+    b = resolver_commit(args[1])
     if a == "" or b == ""
         aviso("no existe alguno de los dos")
         return

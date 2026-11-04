@@ -640,7 +640,7 @@ func orden_log(args: [String])
         end
         i = i + 1
     end
-    id = resolver(desde)
+    id = resolver_commit(desde)
     if id == ""
         if desde == "HEAD"
             Print "Aún no hay commits"
@@ -768,7 +768,7 @@ func orden_branch(args: [String])
         aviso("ya existe la rama " + n)
         return
     end
-    id = resolver(desde)
+    id = resolver_commit(desde)
     if id == ""
         aviso("no hay commit en " + desde)
         return
@@ -999,7 +999,7 @@ func orden_checkout(args: [String])
             destino = args[2]
         end
     end
-    id = resolver(destino)
+    id = resolver_commit(destino)
     if id == ""
         aviso("no existe " + destino)
         return

@@ -35,7 +35,7 @@ Pendientes:
   la de ahora menos 1 s van con mtime 0, para que la siguiente vez se comparen por su contenido (como hace git).
 - [x] **T2 (9).** Desbordamiento en el diff: comprobar `(x + 1) * (y + 1) <= MAX_CELDAS` sin multiplicar (dividir),
   y si `buffer_alloc` da nil, el diff sencillo (todo quitado y puesto).
-- [ ] **T3 (10).** Etiquetas anotadas: una función que lleva una etiqueta a su commit (campo "object" del objeto
+- [x] **T3 (10).** Etiquetas anotadas: una función que lleva una etiqueta a su commit (campo "object" del objeto
   tag), usada en checkout, branch, log, merge, diff y donde se espere un commit. `cat-file` sigue enseñando la
   etiqueta.
 - [ ] **T4 (11).** `branch -d` quita también la rama de `packed-refs` (y su línea "^" si la tiene).
@@ -74,3 +74,6 @@ Pendientes:
   nueva de `tests/arreglos.sh` (mismo tamaño en el mismo segundo) falla sin el arreglo y pasa con él. Todas, bien.
 - 2026-11-04: T2 hecho. La tabla del LCS se comprueba sin multiplicar y, si no hay memoria, el diff sencillo.
   `tests/diff.sh` lleva un diff de 47000 líneas distintas en cada lado (antes se salía de 32 bits): bien.
+- 2026-11-04: T3 hecho. `resolver_commit` lleva una etiqueta anotada a su commit; lo usan checkout, branch, log,
+  merge y merge-base (cat-file sigue con `resolver`). `tests/fase3.sh` lleva una etiqueta anotada hecha en el PC:
+  log, branch desde ella, checkout (HEAD suelto) y status limpio. Bien.

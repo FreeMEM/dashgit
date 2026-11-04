@@ -31,6 +31,7 @@ open('docs/notas.txt','w').write('notas\n' * (10 + v))
   git checkout -qb otra
   echo "solo en otra" > otra.txt; git add -A; git commit -qm "en otra"
   git checkout -q main
+  git tag -a v2 -m "etiqueta anotada" main~2
 )
 git clone -q --no-local "$tmp/origen" "$tmp/sys/P"
 (cd "$tmp/sys/P" && git branch -q otra origin/otra && git gc -q --aggressive && git config user.name Amiga && git config user.email a@a)
@@ -61,6 +62,10 @@ base=$((2 + ncat))
   echo "Echo \"del amiga\" >amiga.txt"
   r "add amiga.txt"
   r "commit -m desde-el-amiga"
+  echo "dashgit log --oneline v2 >DH0:R/tag_log.txt"
+  echo "dashgit branch de-tag v2 >DH0:R/tag_branch.txt"
+  echo "dashgit checkout v2 >DH0:R/tag_checkout.txt"
+  echo "dashgit status -s >DH0:R/tag_status.txt"
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-400} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -79,9 +84,14 @@ k=$((k+1)); grep -q "Cambiado a la rama otra" "$d/R/$(printf %02d $k).txt" && bi
 k=$((k+1))
 k=$((k+1))
 k=$((k+1)); grep -q "desde-el-amiga" "$d/R/$(printf %02d $k).txt" && bien "commit" || { mal "commit:"; ver $(printf %02d $k); }
-[ "$(cat otra.txt 2>/dev/null)" = "solo en otra" ] && bien "fichero de otra" || mal "fichero de otra"
+[ "$(git show otra:otra.txt 2>/dev/null)" = "solo en otra" ] && bien "fichero de otra" || mal "fichero de otra"
 [ "$(git log --format=%s -1 otra)" = "desde-el-amiga" ] && bien "git ve el commit" || mal "git ve el commit"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5 || true
 [ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git status --porcelain | head; }
+# etiqueta anotada (v2 apunta a un objeto tag, no a un commit)
+[ "$(iconv -f latin1 -t utf-8 "$d/R/tag_log.txt")" = "$(git log --oneline v2)" ] && bien "log de una etiqueta anotada" || { mal "log v2:"; cat "$d/R/tag_log.txt"; }
+[ "$(git rev-parse de-tag)" = "$(git rev-parse 'v2^{commit}')" ] && bien "branch desde una etiqueta anotada" || { mal "branch de-tag:"; cat "$d/R/tag_branch.txt"; git rev-parse de-tag; }
+grep -q "HEAD suelto" "$d/R/tag_checkout.txt" && [ "$(cat .git/HEAD)" = "$(git rev-parse 'v2^{commit}')" ] && bien "checkout de una etiqueta anotada" || { mal "checkout v2:"; cat "$d/R/tag_checkout.txt"; }
+[ -z "$(cat "$d/R/tag_status.txt")" ] && bien "limpio en la etiqueta" || { mal "status en v2:"; cat "$d/R/tag_status.txt"; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"
 exit 0
