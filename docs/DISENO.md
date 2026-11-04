@@ -69,3 +69,10 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   mismo log y los mismos blobs; status limpio, checkout de otra rama y commit encima, y el git del PC lo da por
   bueno. Pendiente: ids abreviados que solo están en packs, y una caché de bases para cadenas de deltas largas.
   FS-UAE no abre los ficheros de solo lectura del PC (git deja así los packs): la prueba les quita esa marca.
+- 2026-11-04: fase 4 (`tests/fase4.sh`, contra `tests/servidor_git.py`, git http-backend en el PC; también con
+  `chunked=1`): clone (ramas, etiquetas, HEAD del remoto), push (un pack sin deltas, report-status), fetch y pull
+  con avance rápido. El índice del pack recibido se hace como `git index-pack` (con `inflate_used` y crc32).
+  Clon de verdad desde GitHub por HTTPS con AmiSSL en el emulador: FreeMEM/inferencia (373 objetos, 181 KB de pack,
+  65 ficheros) en unos 3 minutos de emulador a toda velocidad, y el git del PC lo da por bueno (fsck, status
+  limpio, árbol idéntico). Sin probar: push a GitHub con token, y la velocidad en un A1200 de verdad.
+  Pendiente: fusionar (pull sin avance rápido), la respuesta entera va a memoria (repos grandes), deltas al subir.
