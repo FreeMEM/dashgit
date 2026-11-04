@@ -135,13 +135,19 @@ end
 
 # ---- fechas ----
 
-# La zona de dashgit.zona ("+0100"); "+0000" si no está
+# La zona horaria ("+0100"): la de dashgit.zona si está, si no la de las Preferencias de Locale
 func zona() -> String
     z = config_leer("dashgit.zona")
     if z.length == 5 and (str_starts(z, "+") or str_starts(z, "-"))
         return z
     end
-    return "+0000"
+    m = locale_gmt_offset()
+    signo = "+"
+    if m < 0
+        signo = "-"
+        m = -m
+    end
+    return signo + _dos(m / 60) + _dos(m % 60)
 end
 
 # Los segundos de una zona ("+0130" da 5400)

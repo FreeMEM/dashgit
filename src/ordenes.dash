@@ -4,6 +4,7 @@
 import "arbol.dash"
 
 func aviso(msg: String)
+    codigo = 10
     Print "dashgit: " + msg
 end
 

@@ -1,6 +1,9 @@
 # dashgit - utilidades: rutas, búferes y hexadecimal
 # Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
 
+# El código de retorno del programa (10 si hubo un error)
+var codigo: Int = 0
+
 # Unos bytes en un búfer (el dueño lo libera con trozo_libre)
 struct Trozo
     buf: Pointer = nil

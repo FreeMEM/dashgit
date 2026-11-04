@@ -155,10 +155,9 @@ func indice_escribir(l: [EntradaIndice]) -> Bool
         str_to_buffer(e.ruta, b, o + 62)
         o = o + ((62 + e.ruta.length + 8) & 0xFFFFFFF8)
     end
-    s = sha1_nuevo()
-    sha1_poner(s, b, 0, o)
-    sha1_acabar(s, b, o)
-    sha1_libre(s)
+    h = sha1_new()
+    sha1_add(h, b, o)
+    sha1_bytes(h, b + o)
     tmp = git_dir + "/index.lock"
     ok = file_save(tmp, b, total) == total
     buffer_free(b)

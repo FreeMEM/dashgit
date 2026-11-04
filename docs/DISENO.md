@@ -10,10 +10,9 @@ misma de git. Decidido por el usuario el 2026-11-04, tras descartar am-git (sin 
   revés. Las pruebas lo comprueban con el git del PC.
 - **Una orden del Shell.** `dashgit <orden> [argumentos]`, con los nombres de git: `init`, `add`, `commit`...
   Forja la usará desde su menú Git, como ya usa `dash`, y mostrará lo que escriba en su panel de salida.
-- **Lo que necesita de Dash** (rama `sha1` de Dash, en pruebas): `sha1_new`/`sha1_add`/`sha1_bytes`/`sha1_hex` y
-  `sha1(buffer, n)`, `inflate_used()` (los bytes de entrada que usó el último inflate, para leer packs) y
-  `adler32` (para escribir zlib con cabecera). El SHA-1 en Dash puro (`src/sha1.dash`) funciona, pero va a unos
-  8 KB/s en el emulador: solo queda de reserva.
+- **Lo que necesita de Dash** (en Dash main desde el PR #108): `sha1` y `sha1_new`/`sha1_add`/`sha1_bytes`,
+  `inflate_used()` (los bytes de entrada que usó el último inflate, para leer packs), `adler32` (zlib con
+  cabecera), `program_exit` (código de retorno 10 si algo falla) y `locale_gmt_offset` (la zona de las fechas).
 - **Nombres de ficheros.** Git guarda bytes y el PC usa UTF-8. En el disco del Amiga van en Latin-1. dashgit
   convierte al leer y al escribir el árbol de trabajo (`utf8_to_latin1`, `latin1_to_utf8`).
 - **Mayúsculas.** El sistema de ficheros del Amiga no las distingue. Dos rutas que solo se diferencian en eso son
@@ -23,7 +22,8 @@ misma de git. Decidido por el usuario el 2026-11-04, tras descartar am-git (sin 
 - **Saltos de línea.** No se tocan: el Amiga usa LF, como git.
 - **Memoria.** Cada objeto se carga entero. Los packs se leen con `file_seek` desde su `.idx`, sin cargarlos
   enteros. Un objeto más grande que la memoria libre da un error claro.
-- **Fechas.** `time_unix()` y la zona de `ENV:TZ` si está; si no, `+0000`.
+- **Fechas.** `time_unix()` es la hora local del Amiga; se le resta la zona de `locale_gmt_offset()` (o la de
+  `dashgit config dashgit.zona +0100`) para guardar la hora en UTC con su zona, como git.
 - **Red.** HTTP inteligente de git (`info/refs`, `git-upload-pack`, `git-receive-pack`), protocolo v0/v1, sobre
   los `net_*` y `tls_*` de Dash con AmiSSL. Sin ssh. Credenciales: un token en `ENVARC:dashgit/credenciales`
   (formato netrc), o `DASHGIT_USUARIO` y `DASHGIT_TOKEN`.
@@ -61,3 +61,5 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   disco: las pruebas los borran antes de pasar el git del PC.
 - Dash: las funciones que empiezan por `_` no se ven desde otro módulo; `for i in (0..n - 1)` con n = 0 cuenta
   hacia abajo (0, -1), así que los bucles que pueden estar vacíos van con `while`.
+- 2026-11-04: con los builtins de Dash (PR #108) fuera el SHA-1 en Dash puro; zona de Locale y código de retorno
+  10 cuando una orden falla. Las tres pruebas, bien.

@@ -12,6 +12,7 @@ import "diff.dash"
 const VERSION = "0.1"
 
 func error(msg: String)
+    codigo = 10
     Print "dashgit: " + msg
 end
 
@@ -224,5 +225,8 @@ Main
             error("orden desconocida: " + orden)
             uso()
         end
+    end
+    if codigo != 0
+        program_exit(codigo)
     end
 end
