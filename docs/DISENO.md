@@ -56,7 +56,8 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
 - 2026-11-04: fase 1 hecha (`tests/fase1.sh`: init, hash-object, cat-file, config; el git del PC lee lo que escribe
   el Amiga). Fase 2 casi entera (`tests/fase2.sh`): add (con .gitignore sencillo), rm, status (también -s), commit
   (-a, -m), log (--oneline, -n), branch (-d), checkout (rama, -b, -- fichero), y el git del PC da por buenos los
-  commits, el índice y los árboles. Falta `diff`. En el emulador, FS-UAE deja ficheros `.uaem` junto a los del
+  commits, el índice y los árboles. `diff` y `diff --cached` (`tests/diff.sh`) dan lo mismo que el git del PC,
+  salvo el nombre de la función que git pone tras los `@@`. En el emulador, FS-UAE deja ficheros `.uaem` junto a los del
   disco: las pruebas los borran antes de pasar el git del PC.
 - Dash: las funciones que empiezan por `_` no se ven desde otro módulo; `for i in (0..n - 1)` con n = 0 cuenta
   hacia abajo (0, -1), así que los bucles que pueden estar vacíos van con `while`.

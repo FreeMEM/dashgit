@@ -7,7 +7,7 @@
 @version "dashgit 0.1"
 @stack 100000
 
-import "ordenes.dash"
+import "diff.dash"
 
 const VERSION = "0.1"
 
@@ -29,6 +29,7 @@ func uso()
     Print "  dashgit log [--oneline] [-n N] [desde]"
     Print "  dashgit branch [-d] [rama [desde]]"
     Print "  dashgit checkout (rama | -b rama | -- fichero...)"
+    Print "  dashgit diff [--cached] [fichero...]"
 end
 
 func necesita_repo() -> Bool
@@ -197,7 +198,7 @@ Main
             orden_cat_file(args)
         elif orden == "config"
             orden_config(args)
-        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout"
+        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff"
             if necesita_repo()
                 if orden == "add"
                     orden_add(args)
@@ -211,6 +212,8 @@ Main
                     orden_log(args)
                 elif orden == "branch"
                     orden_branch(args)
+                elif orden == "diff"
+                    orden_diff(args)
                 else
                     orden_checkout(args)
                 end

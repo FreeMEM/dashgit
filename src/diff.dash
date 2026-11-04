@@ -1,0 +1,364 @@
+# dashgit - diff unificado por líneas
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "ordenes.dash"
+
+const CONTEXTO = 3
+const MAX_CELDAS = 400000   # tope de la tabla del LCS (2 bytes cada celda)
+
+# Las líneas de un blob ("" de id: ninguna); nil si es binario
+func lineas_de(id: String) -> [String]
+    var r: [String] = []
+    if id == ""
+        return r
+    end
+    o = objeto_leer(id)
+    if o == nil
+        return r
+    end
+    r = _partir(o.datos, o.n)
+    objeto_libre(o)
+    return r
+end
+
+func lineas_de_fichero(ruta: String) -> [String]
+    var r: [String] = []
+    t = leer_fichero(ruta_amiga(ruta))
+    if t == nil
+        return r
+    end
+    r = _partir(t.buf, t.n)
+    trozo_libre(t)
+    return r
+end
+
+func _partir(b: Pointer, n: Int) -> [String]
+    mira = n
+    if mira > 8000
+        mira = 8000
+    end
+    if mira > 0 and buffer_find_byte(b, 0, mira, 0) >= 0
+        return nil
+    end
+    var r: [String] = []
+    i = 0
+    while i < n
+        nl = buffer_find_byte(b, i, n, 10)
+        if nl < 0
+            r.push(str_from_buffer(b, i, n - i) + "\n\\ No newline at end of file")
+            return r
+        end
+        r.push(str_from_buffer(b, i, nl - i))
+        i = nl + 1
+    end
+    return r
+end
+
+# Las operaciones de pasar de a a b: " " igual, "-" quitar, "+" poner, una por línea (en orden)
+func operaciones(a: [String], b: [String]) -> [String]
+    var ops: [String] = []
+    n = a.length
+    m = b.length
+    ini = 0
+    while ini < n and ini < m and a[ini] == b[ini]
+        ini = ini + 1
+    end
+    fa = n
+    fb = m
+    while fa > ini and fb > ini and a[fa - 1] == b[fb - 1]
+        fa = fa - 1
+        fb = fb - 1
+    end
+    i = 0
+    while i < ini
+        ops.push(" ")
+        i = i + 1
+    end
+    x = fa - ini
+    y = fb - ini
+    if x > 0 and y > 0 and (x + 1) * (y + 1) <= MAX_CELDAS
+        # LCS: t[i][j] = lo más largo común de a[ini+i..fa) y b[ini+j..fb)
+        w = y + 1
+        t = buffer_alloc((x + 1) * w * 2)
+        buffer_fill(t, 0, (x + 1) * w * 2, 0)
+        i = x - 1
+        while i >= 0
+            j = y - 1
+            while j >= 0
+                if a[ini + i] == b[ini + j]
+                    buffer_set_word(t, (i * w + j) * 2, buffer_get_word(t, ((i + 1) * w + j + 1) * 2) + 1)
+                else
+                    p = buffer_get_word(t, ((i + 1) * w + j) * 2)
+                    q = buffer_get_word(t, (i * w + j + 1) * 2)
+                    if q > p
+                        p = q
+                    end
+                    buffer_set_word(t, (i * w + j) * 2, p)
+                end
+                j = j - 1
+            end
+            i = i - 1
+        end
+        i = 0
+        j = 0
+        while i < x and j < y
+            if a[ini + i] == b[ini + j]
+                ops.push(" ")
+                i = i + 1
+                j = j + 1
+            elif buffer_get_word(t, ((i + 1) * w + j) * 2) >= buffer_get_word(t, (i * w + j + 1) * 2)
+                ops.push("-")
+                i = i + 1
+            else
+                ops.push("+")
+                j = j + 1
+            end
+        end
+        while i < x
+            ops.push("-")
+            i = i + 1
+        end
+        while j < y
+            ops.push("+")
+            j = j + 1
+        end
+        buffer_free(t)
+    else
+        i = 0
+        while i < x
+            ops.push("-")
+            i = i + 1
+        end
+        i = 0
+        while i < y
+            ops.push("+")
+            i = i + 1
+        end
+    end
+    i = fa
+    while i < n
+        ops.push(" ")
+        i = i + 1
+    end
+    return ops
+end
+
+func _rango(desde: Int, cuantas: Int) -> String
+    if cuantas == 1
+        return str_from_int(desde, 10)
+    end
+    if cuantas == 0
+        return str_from_int(desde - 1, 10) + ",0"
+    end
+    return str_from_int(desde, 10) + "," + str_from_int(cuantas, 10)
+end
+
+# Escribe los trozos del diff de a a b
+func escribir_trozos(a: [String], b: [String])
+    var ops: [String] = operaciones(a, b)
+    total = ops.length
+    k = 0
+    while k < total
+        # el siguiente cambio
+        while k < total and ops[k] == " "
+            k = k + 1
+        end
+        if k >= total
+            return
+        end
+        # el trozo empieza CONTEXTO antes y acaba cuando hay más de 2*CONTEXTO iguales seguidas
+        ini = k - CONTEXTO
+        if ini < 0
+            ini = 0
+        end
+        fin = k
+        iguales = 0
+        while fin < total
+            if ops[fin] == " "
+                iguales = iguales + 1
+                if iguales > 2 * CONTEXTO
+                    fin = fin + 1
+                    break
+                end
+            else
+                iguales = 0
+            end
+            fin = fin + 1
+        end
+        fin = fin - iguales + CONTEXTO
+        if fin > total
+            fin = total
+        end
+        # dónde empieza en a y en b
+        ia = 0
+        ib = 0
+        z = 0
+        while z < ini
+            if ops[z] != "+"
+                ia = ia + 1
+            end
+            if ops[z] != "-"
+                ib = ib + 1
+            end
+            z = z + 1
+        end
+        ca = 0
+        cb = 0
+        z = ini
+        while z < fin
+            if ops[z] != "+"
+                ca = ca + 1
+            end
+            if ops[z] != "-"
+                cb = cb + 1
+            end
+            z = z + 1
+        end
+        Print "@@ -" + _rango(ia + 1, ca) + " +" + _rango(ib + 1, cb) + " @@"
+        z = ini
+        while z < fin
+            if ops[z] == " "
+                Print " " + a[ia]
+                ia = ia + 1
+                ib = ib + 1
+            elif ops[z] == "-"
+                Print "-" + a[ia]
+                ia = ia + 1
+            else
+                Print "+" + b[ib]
+                ib = ib + 1
+            end
+            z = z + 1
+        end
+        k = fin
+    end
+end
+
+# El diff de un fichero: ids "" para "no está"; con en_trabajo, b se lee del disco
+func diff_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_b: Int, en_trabajo: Bool)
+    nombre = utf8_to_latin1(ruta)
+    Print "diff --git a/" + nombre + " b/" + nombre
+    var a: [String] = lineas_de(id_a)
+    var b: [String] = []
+    if en_trabajo
+        b = lineas_de_fichero(ruta)
+    else
+        b = lineas_de(id_b)
+    end
+    cero = "0000000"
+    ca = cero
+    if id_a != ""
+        ca = id_a[:7]
+    end
+    cb = cero
+    if id_b != ""
+        cb = id_b[:7]
+    end
+    if id_a == ""
+        Print "new file mode " + modo_texto(modo_b)
+        Print "index " + ca + ".." + cb
+    elif id_b == "" and not en_trabajo
+        Print "deleted file mode " + modo_texto(modo_a)
+        Print "index " + ca + ".." + cb
+    else
+        Print "index " + ca + ".." + cb + " " + modo_texto(modo_a)
+    end
+    if a == nil or b == nil
+        Print "Binary files differ"
+        return
+    end
+    if id_a == ""
+        Print "--- /dev/null"
+    else
+        Print "--- a/" + nombre
+    end
+    if id_b == "" and not en_trabajo
+        Print "+++ /dev/null"
+    else
+        Print "+++ b/" + nombre
+    end
+    escribir_trozos(a, b)
+end
+
+func orden_diff(args: [String])
+    preparado = false
+    var filtro: [String] = []
+    for x in args
+        if x == "--cached" or x == "--staged"
+            preparado = true
+        elif x != "--"
+            filtro.push(ruta_git(x))
+        end
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return
+    end
+    if preparado
+        var cab: [EntradaIndice] = ficheros_de_commit(head_id())
+        var en_cab: {String: Int} = {}
+        i = 0
+        while i < cab.length
+            en_cab[cab[i].ruta] = i + 1
+            i = i + 1
+        end
+        var en_idx: {String: Int} = {}
+        i = 0
+        while i < idx.length
+            en_idx[idx[i].ruta] = i + 1
+            i = i + 1
+        end
+        # recorrer las dos listas en orden
+        var rutas: [String] = []
+        for e in cab
+            rutas.push(e.ruta)
+        end
+        for e in idx
+            if en_cab.get(e.ruta, 0) == 0
+                rutas.push(e.ruta)
+            end
+        end
+        rutas.sort(fn(a, b) -> a < b)
+        for r in rutas
+            if _pasa(r, filtro)
+                p = en_cab.get(r, 0)
+                q = en_idx.get(r, 0)
+                if p == 0
+                    diff_fichero(r, "", 0, idx[q - 1].id, idx[q - 1].modo, false)
+                elif q == 0
+                    diff_fichero(r, cab[p - 1].id, cab[p - 1].modo, "", 0, false)
+                elif cab[p - 1].id != idx[q - 1].id
+                    diff_fichero(r, cab[p - 1].id, cab[p - 1].modo, idx[q - 1].id, idx[q - 1].modo, false)
+                end
+            end
+        end
+        return
+    end
+    # el índice contra el árbol de trabajo
+    for e in idx
+        if _pasa(e.ruta, filtro)
+            f = trabajo_mirar(e.ruta)
+            if f.tam < 0
+                diff_fichero(e.ruta, e.id, e.modo, "", 0, false)
+            elif f.tam != e.tam or f.mtime != e.mtime
+                id = trabajo_guardar(e.ruta, false)
+                if id != e.id
+                    diff_fichero(e.ruta, e.id, e.modo, id, e.modo, true)
+                end
+            end
+        end
+    end
+end
+
+func _pasa(r: String, filtro: [String]) -> Bool
+    if filtro.length == 0
+        return true
+    end
+    for c in filtro
+        if dentro_de(r, c)
+            return true
+        end
+    end
+    return false
+end

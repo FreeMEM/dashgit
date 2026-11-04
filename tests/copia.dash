@@ -1,0 +1,6 @@
+# Ayuda de las pruebas: copia arg(0) en arg(1) (el sistema de pruebas no trae C:Copy)
+Main
+    if not file_copy(arg(0), arg(1))
+        Print "copia: no se pudo copiar " + arg(0)
+    end
+end
