@@ -125,6 +125,15 @@ end
 # Escribe .git/index (versión 2, sin extensiones)
 func indice_escribir(l: [EntradaIndice]) -> Bool
     l.sort(por_ruta)
+    # un fichero cambiado en este mismo segundo podría volver a cambiar sin que cambien su tamaño ni su fecha: esas
+    # entradas van con fecha 0, para que la próxima vez se comparen por su contenido (lo que git llama "racy")
+    ahora = time_unix()
+    for e in l
+        if e.mtime >= ahora - 1
+            e.mtime = 0
+            e.mtime_ns = 0
+        end
+    end
     total = 12 + 20
     for e in l
         total = total + ((62 + e.ruta.length + 8) & 0xFFFFFFF8)

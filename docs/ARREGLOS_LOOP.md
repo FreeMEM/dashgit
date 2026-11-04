@@ -31,7 +31,7 @@ Hechas en el código pero sin probar todavía (T0):
 
 Pendientes:
 
-- [ ] **T1 (8).** Cambios en el mismo segundo: al escribir el índice, las entradas con fecha igual o posterior a
+- [x] **T1 (8).** Cambios en el mismo segundo: al escribir el índice, las entradas con fecha igual o posterior a
   la de ahora menos 1 s van con mtime 0, para que la siguiente vez se comparen por su contenido (como hace git).
 - [ ] **T2 (9).** Desbordamiento en el diff: comprobar `(x + 1) * (y + 1) <= MAX_CELDAS` sin multiplicar (dividir),
   y si `buffer_alloc` da nil, el diff sencillo (todo quitado y puesto).
@@ -70,3 +70,5 @@ Pendientes:
 - 2026-11-04: T10 hecho. Con Dash main 283b11c (PR #112: el compilador directo ya cierra bsdsocket.library al
   salir), 25 programas seguidos con red van bien y `tests/fase4.sh` entera pasa (pull que fusiona y su push).
   Además: dashgit pasa a "0.1 alfa" (README, ayuda, $VER) y Forja 0.3 sale con el menú "Git (alfa)".
+- 2026-11-04: T1 hecho. `indice_escribir` pone fecha 0 a las entradas de este segundo o del anterior; la prueba
+  nueva de `tests/arreglos.sh` (mismo tamaño en el mismo segundo) falla sin el arreglo y pasa con él. Todas, bien.

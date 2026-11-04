@@ -3,7 +3,8 @@
 #  - cambiar de rama conserva los cambios sin commit (en el disco y añadidos) de los ficheros que no cambian;
 #  - un fichero "a" que pasa a cajón "a/" con add, y checkout entre una rama con el fichero y otra con el cajón;
 #  - merge-base en un caso con dos antepasados comunes (el bueno es el de git);
-#  - fusión con una última línea sin salto: conflicto, como git.
+#  - fusión con una última línea sin salto: conflicto, como git;
+#  - un cambio del mismo tamaño en el mismo segundo se ve.
 # Acaba con "TODO BIEN".
 #
 #   DASH_KICKSTART=... tests/arreglos.sh [DASH_DIR]
@@ -73,9 +74,16 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   r "checkout main"                 # 11  main tiene el cajón "a/"
   echo "copia a/x DH0:R/ax_en_main.txt"
   r "status -s"                     # 12
+  # el mismo tamaño en el mismo segundo
+  echo "Echo \"aaaa\" >racy.txt"
+  r "add racy.txt"                  # 13
+  echo "Echo \"bbbb\" >racy.txt"
+  r "status -s"                     # 14  tiene que ver el cambio
+  r "add racy.txt"                  # 15
+  r "commit -m racy"                # 16
   echo "CD DH0:M"
-  r "merge-base main f"             # 13
-  r "merge s"                       # 14  sin salto final
+  r "merge-base main f"             # 17
+  r "merge s"                       # 18  sin salto final
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-500} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -90,15 +98,16 @@ mal() { echo "FALLO $1"; fallos=$((fallos+1)); }
 [ "$(cat "$d/R/a_en_b.txt" 2>/dev/null)" = "nada" ] && bien "checkout de cajón a fichero" || { mal "a en b:"; ver 10; }
 [ "$(cat "$d/R/ax_en_main.txt" 2>/dev/null)" = "dentro" ] && bien "checkout de fichero a cajón" || { mal "a/x en main:"; ver 11; }
 [ -z "$(ver 12)" ] && bien "limpio" || { mal "status:"; ver 12; }
-[ "$(ver 13)" = "$(cat "$tmp/esperado_base.txt")" ] && bien "merge-base como git" || { mal "merge-base: $(ver 13) en vez de $(cat "$tmp/esperado_base.txt")"; }
+ver 14 | grep -q "^ M racy.txt" && bien "cambio en el mismo segundo" || { mal "cambio en el mismo segundo:"; ver 14; }
+[ "$(ver 17)" = "$(cat "$tmp/esperado_base.txt")" ] && bien "merge-base como git" || { mal "merge-base: $(ver 17) en vez de $(cat "$tmp/esperado_base.txt")"; }
 if [ "$(cat "$tmp/esperado_salto.txt")" = conflicto ]; then
-  ver 14 | grep -q CONFLICTO && bien "sin salto final: conflicto como git" || { mal "sin salto final:"; ver 14; }
+  ver 18 | grep -q CONFLICTO && bien "sin salto final: conflicto como git" || { mal "sin salto final:"; ver 18; }
 else
-  ver 14 | grep -q "Fusión hecha" && bien "sin salto final: limpio como git" || { mal "sin salto final:"; ver 14; }
+  ver 18 | grep -q "Fusión hecha" && bien "sin salto final: limpio como git" || { mal "sin salto final:"; ver 18; }
 fi
 cd "$d/P"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5
-[ "$(git ls-tree --name-only main)" = "$(printf 'README\na\nnuevo.txt\notro.txt')" ] && [ "$(git ls-tree -r --name-only main | grep -c '^a')" = 1 ] && bien "árbol sin fichero y cajón a la vez" || { mal "árbol:"; git ls-tree -r main; }
+[ "$(git ls-tree --name-only main)" = "$(printf 'README\na\nnuevo.txt\notro.txt\nracy.txt')" ] && [ "$(git ls-tree -r --name-only main | grep -c '^a')" = 1 ] && bien "árbol sin fichero y cajón a la vez" || { mal "árbol:"; git ls-tree -r main; }
 [ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git status --porcelain; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"
 exit 0
