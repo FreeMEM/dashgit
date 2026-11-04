@@ -54,7 +54,7 @@ Pendientes:
 - [ ] **T9 (5).** Nombres que no caben en Latin-1 ("€", japonés...) o que el disco no admite (":", más de 30
   letras en FFS) y dos rutas que solo se diferencian en mayúsculas: al sacarlos, un aviso y se saltan (sin
   pisar nada); `status` no los da por borrados.
-- [ ] **T10.** La prueba de red (`tests/fase4.sh`) entera: cuando la sesión de Dash arregle lo de bsdsocket.library
+- [x] **T10.** La prueba de red (`tests/fase4.sh`) entera: cuando la sesión de Dash arregle lo de bsdsocket.library
   tras ocho programas, o partiéndola en dos arranques del emulador.
 - [ ] **T11.** Subir a GitHub de verdad con un token, solo si el usuario da un repo de pruebas y el token (no
   pedírselo dentro del bucle: se apunta como pendiente y se sigue).
@@ -67,3 +67,6 @@ Pendientes:
   "a" a cajón "a/" con add y checkout en los dos sentidos, `merge-base` (orden nueva) igual que git con dos
   antepasados comunes, y la fusión sin salto final da conflicto como git. El (3) no tiene prueba (habría que
   bloquear un fichero). Todas las pruebas locales, bien.
+- 2026-11-04: T10 hecho. Con Dash main 283b11c (PR #112: el compilador directo ya cierra bsdsocket.library al
+  salir), 25 programas seguidos con red van bien y `tests/fase4.sh` entera pasa (pull que fusiona y su push).
+  Además: dashgit pasa a "0.1 alfa" (README, ayuda, $VER) y Forja 0.3 sale con el menú "Git (alfa)".
