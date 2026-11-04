@@ -8,7 +8,7 @@ Está empezando. Hoy hace `init`, `add`, `rm`, `status`, `commit`, `log`, `branc
 
 ## Compilar
 
-Necesita Dash 2.3 o posterior (o Dash main desde el PR #108: SHA-1, adler32, `inflate_used`...).
+Necesita un Dash posterior a la 2.2.0, con el PR #108 (SHA-1, adler32, `inflate_used`...).
 
     ~/Projects/FreeMEMLang/dash src/main.dash -o build/dashgit
 
