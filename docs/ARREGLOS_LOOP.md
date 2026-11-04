@@ -14,6 +14,10 @@ vuelta del bucle hace UNA tarea, la prueba en FS-UAE, la guarda con un commit, l
   pueda.
 - Antes de dar algo por hecho, que pase. Si una tarea no se puede hacer, se dice por qué y se pasa a la siguiente.
 - Los cambios en Dash los hace la sesión de Dash (freememlang): se le piden por SendMessage.
+- Tablero común de las sesiones: `~/Projects/dash-coordinacion.md` (sesión forja-87). Poner al día la línea al
+  empezar y al acabar cada tarea. El emulador, siempre bajo `flock /run/user/1000/dash-emu-red.lock`
+  (por ejemplo `flock /run/user/1000/dash-emu-red.lock tests/fase2.sh`). Nada hacia fuera (GitHub, Telegram, webs)
+  sin permiso del usuario en esta sesión; los `git push` de dashgit ya los tiene (bucle pedido por el usuario).
 - Textos para el usuario: castellano llano y comillas rectas.
 - Al acabar todas las tareas, se para el bucle y se avisa al usuario con un resumen corto.
 
