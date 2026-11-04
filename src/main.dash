@@ -19,6 +19,8 @@ end
 func uso()
     Print "dashgit " + VERSION + " - git para AmigaOS"
     Print ""
+    Print "  dashgit [-C cajón] orden [argumentos]"
+    Print ""
     Print "  dashgit init [cajón]"
     Print "  dashgit hash-object [-w] [-t tipo] fichero"
     Print "  dashgit cat-file (-t | -s | -p | tipo) objeto"
@@ -188,9 +190,18 @@ Main
     if arg_count() < 1
         uso()
     else
-        orden = arg(0)
+        primero = 0
+        # -C cajón: como si se ejecutara desde ese cajón (como en git; Forja lo usa)
+        while arg(primero) == "-C" and primero + 1 < arg_count()
+            if not dir_change(arg(primero + 1))
+                error("no existe el cajón " + arg(primero + 1))
+                program_exit(10)
+            end
+            primero = primero + 2
+        end
+        orden = arg(primero)
         var args: [String] = []
-        i = 1
+        i = primero + 1
         while i < arg_count()
             args.push(arg(i))
             i = i + 1

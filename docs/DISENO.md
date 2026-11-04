@@ -76,3 +76,7 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   65 ficheros) en unos 3 minutos de emulador a toda velocidad, y el git del PC lo da por bueno (fsck, status
   limpio, árbol idéntico). Sin probar: push a GitHub con token, y la velocidad en un A1200 de verdad.
   Pendiente: fusionar (pull sin avance rápido), la respuesta entera va a memoria (repos grandes), deltas al subir.
+- 2026-11-04: `-C cajón` (como en git). Fase 5 en la rama `git` de Forja: menú Git (estado, diferencias, historial,
+  añadir, confirmar con mensaje, pull, push) y `GIT`/`SALIDA` por ARexx; su `tests/git.sh` hace init, commit,
+  diff, log y push a un servidor del PC desde Forja. Pendiente: marcar en el panel del proyecto los ficheros
+  cambiados.
