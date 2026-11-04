@@ -3,6 +3,9 @@
 Un cliente de git para AmigaOS 3.x en 68k, escrito en [Dash](https://github.com/FreeMEM/dash). Usa el mismo formato
 que git: un repositorio hecho en el Amiga se abre con git en el PC, y al revés.
 
+**Está en alfa.** Las pruebas pasan en el emulador y se comparan con el git del PC, pero aún hay mucho que probar,
+sobre todo en Amigas de verdad y con repositorios grandes. Ten copia de lo importante antes de usarlo con ello.
+
 Hace `clone`, `fetch`, `pull` y `push` por http y https (con AmiSSL), y en local `init`, `add`, `rm`, `status`, `commit`, `log`, `branch`, `checkout`, `diff`, `merge` (con conflictos, como git), `config`, `hash-object` y `cat-file`. El plan, por fases, está en
 [docs/DISENO.md](docs/DISENO.md).
 
