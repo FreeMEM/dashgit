@@ -53,3 +53,10 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
 - 2026-11-04: repo creado (GPLv2). `src/sha1.dash`: SHA-1 en Dash puro, bien con los vectores de prueba
   (vacío, "abc", 448 bits, 20000 "a"); 20000 bytes en 2,3 s en el emulador. Un texto de Dash no puede llevar
   bytes 0: las cabeceras de los objetos (`blob 5\0`) se arman en búferes.
+- 2026-11-04: fase 1 hecha (`tests/fase1.sh`: init, hash-object, cat-file, config; el git del PC lee lo que escribe
+  el Amiga). Fase 2 casi entera (`tests/fase2.sh`): add (con .gitignore sencillo), rm, status (también -s), commit
+  (-a, -m), log (--oneline, -n), branch (-d), checkout (rama, -b, -- fichero), y el git del PC da por buenos los
+  commits, el índice y los árboles. Falta `diff`. En el emulador, FS-UAE deja ficheros `.uaem` junto a los del
+  disco: las pruebas los borran antes de pasar el git del PC.
+- Dash: las funciones que empiezan por `_` no se ven desde otro módulo; `for i in (0..n - 1)` con n = 0 cuenta
+  hacia abajo (0, -1), así que los bucles que pueden estar vacíos van con `while`.

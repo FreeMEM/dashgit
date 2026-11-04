@@ -1,0 +1,349 @@
+# dashgit - el índice (.git/index, versiones 2 y 3) y el árbol de trabajo
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "repo.dash"
+
+const MODO_FICHERO = 33188     # 0100644
+const MODO_EJECUTABLE = 33261  # 0100755
+const MODO_ENLACE = 40960      # 0120000
+const MODO_SUBMODULO = 57344   # 0160000
+
+struct EntradaIndice
+    ruta: String = ""     # relativa a la raíz, con "/", en bytes de git (UTF-8)
+    id: String = ""
+    modo: Int = 33188
+    tam: Int = 0
+    ctime: Int = 0
+    ctime_ns: Int = 0
+    mtime: Int = 0
+    mtime_ns: Int = 0
+    dev: Int = 0
+    ino: Int = 0
+    uid: Int = 0
+    gid: Int = 0
+    etapa: Int = 0        # 0 normal; 1-3 en un conflicto de fusión
+end
+
+func modo_texto(m: Int) -> String
+    if m == MODO_EJECUTABLE
+        return "100755"
+    end
+    if m == MODO_ENLACE
+        return "120000"
+    end
+    if m == MODO_SUBMODULO
+        return "160000"
+    end
+    return "100644"
+end
+
+func modo_numero(s: String) -> Int
+    if s == "100755"
+        return MODO_EJECUTABLE
+    end
+    if s == "120000"
+        return MODO_ENLACE
+    end
+    if s == "160000"
+        return MODO_SUBMODULO
+    end
+    return MODO_FICHERO
+end
+
+func por_ruta(a: EntradaIndice, b: EntradaIndice) -> Int
+    if a.ruta < b.ruta
+        return -1
+    end
+    if a.ruta > b.ruta
+        return 1
+    end
+    return a.etapa - b.etapa
+end
+
+var indice_error: String = ""
+
+# Lee .git/index; una lista vacía si no hay. nil (con indice_error) si está mal.
+func indice_leer() -> [EntradaIndice]
+    var r: [EntradaIndice] = []
+    ruta = git_dir + "/index"
+    if not file_exists(ruta)
+        return r
+    end
+    t = leer_fichero(ruta)
+    if t == nil or t.n < 32
+        indice_error = "no se puede leer " + ruta
+        return nil
+    end
+    b = t.buf
+    if not buffer_equals(b, 0, 4, "DIRC")
+        indice_error = ruta + " no es un índice de git"
+        trozo_libre(t)
+        return nil
+    end
+    version = buffer_get_long(b, 4)
+    if version != 2 and version != 3
+        indice_error = "el índice es de la versión " + str_from_int(version, 10) + " (dashgit lee la 2 y la 3)"
+        trozo_libre(t)
+        return nil
+    end
+    cuantas = buffer_get_long(b, 8)
+    o = 12
+    k = 0
+    while k < cuantas
+        e = EntradaIndice()
+        e.ctime = buffer_get_long(b, o)
+        e.ctime_ns = buffer_get_long(b, o + 4)
+        e.mtime = buffer_get_long(b, o + 8)
+        e.mtime_ns = buffer_get_long(b, o + 12)
+        e.dev = buffer_get_long(b, o + 16)
+        e.ino = buffer_get_long(b, o + 20)
+        e.modo = buffer_get_long(b, o + 24)
+        e.uid = buffer_get_long(b, o + 28)
+        e.gid = buffer_get_long(b, o + 32)
+        e.tam = buffer_get_long(b, o + 36)
+        e.id = a_hex(b, o + 40, 20)
+        flags = buffer_get_word(b, o + 60)
+        e.etapa = (flags >> 12) & 3
+        nombre = o + 62
+        if version == 3 and (flags & 0x4000) != 0
+            nombre = nombre + 2
+        end
+        largo = flags & 0xFFF
+        if largo == 0xFFF
+            largo = buffer_find_byte(b, nombre, t.n, 0) - nombre
+        end
+        e.ruta = str_from_buffer(b, nombre, largo)
+        r.push(e)
+        # la entrada acaba con 1 a 8 bytes 0, hasta un múltiplo de 8 desde su principio
+        o = o + (((nombre - o) + largo + 8) & 0xFFFFFFF8)
+        k = k + 1
+    end
+    trozo_libre(t)
+    return r
+end
+
+# Escribe .git/index (versión 2, sin extensiones)
+func indice_escribir(l: [EntradaIndice]) -> Bool
+    l.sort(por_ruta)
+    total = 12 + 20
+    for e in l
+        total = total + ((62 + e.ruta.length + 8) & 0xFFFFFFF8)
+    end
+    b = buffer_alloc(total)
+    buffer_fill(b, 0, total, 0)
+    str_to_buffer("DIRC", b, 0)
+    buffer_set_long(b, 4, 2)
+    buffer_set_long(b, 8, l.length)
+    o = 12
+    for e in l
+        buffer_set_long(b, o, e.ctime)
+        buffer_set_long(b, o + 4, e.ctime_ns)
+        buffer_set_long(b, o + 8, e.mtime)
+        buffer_set_long(b, o + 12, e.mtime_ns)
+        buffer_set_long(b, o + 16, e.dev)
+        buffer_set_long(b, o + 20, e.ino)
+        buffer_set_long(b, o + 24, e.modo)
+        buffer_set_long(b, o + 28, e.uid)
+        buffer_set_long(b, o + 32, e.gid)
+        buffer_set_long(b, o + 36, e.tam)
+        de_hex(e.id, b, o + 40)
+        largo = e.ruta.length
+        if largo > 0xFFF
+            largo = 0xFFF
+        end
+        buffer_set_word(b, o + 60, (e.etapa << 12) | largo)
+        str_to_buffer(e.ruta, b, o + 62)
+        o = o + ((62 + e.ruta.length + 8) & 0xFFFFFFF8)
+    end
+    s = sha1_nuevo()
+    sha1_poner(s, b, 0, o)
+    sha1_acabar(s, b, o)
+    sha1_libre(s)
+    tmp = git_dir + "/index.lock"
+    ok = file_save(tmp, b, total) == total
+    buffer_free(b)
+    if not ok
+        file_delete(tmp)
+        return false
+    end
+    file_delete(git_dir + "/index")
+    return file_rename(tmp, git_dir + "/index")
+end
+
+# La posición de una ruta en el índice (etapa 0), o -1
+func indice_buscar(l: [EntradaIndice], ruta: String) -> Int
+    i = 0
+    while i < l.length
+        if l[i].ruta == ruta
+            return i
+        end
+        i = i + 1
+    end
+    return -1
+end
+
+# ---- el árbol de trabajo ----
+
+# Una ruta de git (UTF-8, con "/") a una ruta del Amiga bajo la raíz
+func ruta_amiga(r: String) -> String
+    return ruta_unir(raiz, utf8_to_latin1(r))
+end
+
+struct FicheroTrabajo
+    ruta: String = ""     # de git (UTF-8, "/")
+    tam: Int = 0
+    mtime: Int = 0
+end
+
+func _por_ruta_trabajo(a: FicheroTrabajo, b: FicheroTrabajo) -> Bool
+    return a.ruta < b.ruta
+end
+
+# Los ficheros bajo un cajón (relativo a la raíz: "" la raíz), sin .git, en orden de git
+func trabajo_listar(rel: String) -> [FicheroTrabajo]
+    var r: [FicheroTrabajo] = []
+    _listar(rel, r)
+    r.sort(_por_ruta_trabajo)
+    return r
+end
+
+func _listar(rel: String, r: [FicheroTrabajo])
+    d = raiz
+    if rel != ""
+        d = ruta_unir(raiz, utf8_to_latin1(rel))
+    end
+    n = dir_read(d)
+    if n < 0
+        return
+    end
+    # dir_read se pisa al bajar: copiar antes
+    var cajones: [String] = []
+    i = 0
+    while i < n
+        nombre = dir_entry_name(i)
+        if true
+            ruta = latin1_to_utf8(nombre)
+            if rel != ""
+                ruta = rel + "/" + ruta
+            end
+            if dir_entry_is_dir(i)
+                if nombre != ".git"
+                    cajones.push(ruta)
+                end
+            else
+                f = FicheroTrabajo()
+                f.ruta = ruta
+                f.tam = dir_entry_size(i)
+                f.mtime = dir_entry_date(i)
+                r.push(f)
+            end
+        end
+        i = i + 1
+    end
+    for c in cajones
+        _listar(c, r)
+    end
+end
+
+# El tamaño y la fecha de un fichero (por su cajón); tam -1 si no está
+func trabajo_mirar(ruta: String) -> FicheroTrabajo
+    f = FicheroTrabajo()
+    f.ruta = ruta
+    f.tam = -1
+    amiga = ruta_amiga(ruta)
+    d = ruta_padre(amiga)
+    nombre = str_lower(ruta_nombre(amiga))
+    n = dir_read(d)
+    i = 0
+    while i < n
+        if str_lower(dir_entry_name(i)) == nombre and not dir_entry_is_dir(i)
+            f.tam = dir_entry_size(i)
+            f.mtime = dir_entry_date(i)
+            return f
+        end
+        i = i + 1
+    end
+    return f
+end
+
+# Guarda un fichero del árbol de trabajo como blob: su id, o "" si no se pudo
+func trabajo_guardar(ruta: String, escribir: Bool) -> String
+    t = leer_fichero(ruta_amiga(ruta))
+    if t == nil
+        return ""
+    end
+    id = objeto_escribir("blob", t.buf, t.n, escribir)
+    trozo_libre(t)
+    return id
+end
+
+# ---- .gitignore (lo sencillo: nombres con comodines, "/" al final para cajones, "!" no se admite) ----
+
+var _ignorar: [String] = []
+var _ignorar_leido: Bool = false
+
+func _leer_ignorar()
+    _ignorar_leido = true
+    for f in [ruta_unir(raiz, ".gitignore"), git_dir + "/info/exclude"]
+        if file_exists(f)
+            for linea in str_split(file_read_text(f), "\n")
+                l = str_trim(linea)
+                if l != "" and not str_starts(l, "#") and not str_starts(l, "!")
+                    _ignorar.push(l)
+                end
+            end
+        end
+    end
+end
+
+func _comodin(p: String, s: String) -> Bool
+    # wildcard_match usa ~ para escapar; git no
+    return wildcard_match(str_replace(p, "~", "~~"), s, false)
+end
+
+# Si git ignora esta ruta (de git)
+func ignorada(ruta: String) -> Bool
+    if not _ignorar_leido
+        _leer_ignorar()
+    end
+    var partes: [String] = str_split(ruta, "/")
+    for p0 in _ignorar
+        p = p0
+        solo_cajon = str_ends(p, "/")
+        if solo_cajon
+            p = p[:p.length - 1]
+        end
+        anclado = str_contains(p, "/")
+        if str_starts(p, "/")
+            p = p[1:]
+        end
+        if anclado
+            # contra la ruta entera, o contra un cajón suyo
+            if _comodin(p, ruta) and not solo_cajon
+                return true
+            end
+            pre = ""
+            i = 0
+            while i < partes.length - 1
+                if pre != ""
+                    pre = pre + "/"
+                end
+                pre = pre + partes[i]
+                if _comodin(p, pre)
+                    return true
+                end
+                i = i + 1
+            end
+        else
+            i = 0
+            while i < partes.length
+                es_cajon = i < partes.length - 1
+                if (es_cajon or not solo_cajon) and _comodin(p, partes[i])
+                    return true
+                end
+                i = i + 1
+            end
+        end
+    end
+    return false
+end

@@ -7,7 +7,7 @@
 @version "dashgit 0.1"
 @stack 100000
 
-import "repo.dash"
+import "ordenes.dash"
 
 const VERSION = "0.1"
 
@@ -21,7 +21,14 @@ func uso()
     Print "  dashgit init [cajón]"
     Print "  dashgit hash-object [-w] [-t tipo] fichero"
     Print "  dashgit cat-file (-t | -s | -p | tipo) objeto"
-    Print "  dashgit config clave [valor]"
+    Print "  dashgit config [--global] clave [valor]"
+    Print "  dashgit add (fichero | cajón | . | -A)..."
+    Print "  dashgit rm [--cached] fichero..."
+    Print "  dashgit status [-s]"
+    Print "  dashgit commit [-a] -m mensaje"
+    Print "  dashgit log [--oneline] [-n N] [desde]"
+    Print "  dashgit branch [-d] [rama [desde]]"
+    Print "  dashgit checkout (rama | -b rama | -- fichero...)"
 end
 
 func necesita_repo() -> Bool
@@ -190,6 +197,24 @@ Main
             orden_cat_file(args)
         elif orden == "config"
             orden_config(args)
+        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout"
+            if necesita_repo()
+                if orden == "add"
+                    orden_add(args)
+                elif orden == "rm"
+                    orden_rm(args)
+                elif orden == "status"
+                    orden_status(args)
+                elif orden == "commit"
+                    orden_commit(args)
+                elif orden == "log"
+                    orden_log(args)
+                elif orden == "branch"
+                    orden_branch(args)
+                else
+                    orden_checkout(args)
+                end
+            end
         elif orden == "version" or orden == "--version"
             Print "dashgit " + VERSION
         else

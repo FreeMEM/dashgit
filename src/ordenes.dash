@@ -1,0 +1,809 @@
+# dashgit - órdenes de la fase 2: add, rm, status, commit, log, branch, checkout
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "arbol.dash"
+
+func aviso(msg: String)
+    Print "dashgit: " + msg
+end
+
+# ---- rutas que escribe el usuario ----
+
+# El cajón actual relativo a la raíz, en ruta de git ("" en la raíz)
+func cajon_actual() -> String
+    d = dir_current()
+    if str_lower(d) == str_lower(raiz)
+        return ""
+    end
+    pre = raiz
+    if not str_ends(pre, ":") and not str_ends(pre, "/")
+        pre = pre + "/"
+    end
+    if str_starts(str_lower(d), str_lower(pre))
+        return latin1_to_utf8(d[pre.length:])
+    end
+    return ""
+end
+
+# Lo que escribe el usuario ("fichero", "sub/f", ".", "DH0:repo/x") a una ruta de git; "?" si queda fuera
+func ruta_git(a: String) -> String
+    if str_contains(a, ":")
+        pre = raiz
+        if not str_ends(pre, ":") and not str_ends(pre, "/")
+            pre = pre + "/"
+        end
+        if str_lower(a) == str_lower(raiz)
+            return ""
+        end
+        if not str_starts(str_lower(a), str_lower(pre))
+            return "?"
+        end
+        return latin1_to_utf8(a[pre.length:])
+    end
+    base = cajon_actual()
+    r = latin1_to_utf8(a)
+    while str_starts(r, "./")
+        r = r[2:]
+    end
+    if r == "." or r == ""
+        return base
+    end
+    if str_ends(r, "/")
+        r = r[:r.length - 1]
+    end
+    if base == ""
+        return r
+    end
+    return base + "/" + r
+end
+
+# Si ruta está en el cajón c o es c ("" es todo)
+func dentro_de(ruta: String, c: String) -> Bool
+    return c == "" or ruta == c or str_starts(ruta, c + "/")
+end
+
+# ---- add ----
+
+func orden_add(args: [String])
+    if args.length == 0
+        aviso("no se añadió nada (prueba con dashgit add .)")
+        return
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return
+    end
+    var todos: [FicheroTrabajo] = trabajo_listar("")
+    var cajones: [String] = []
+    for a in args
+        if a == "-A" or a == "--all"
+            cajones.push("")
+        else
+            r = ruta_git(a)
+            if r == "?"
+                aviso(a + " está fuera del repositorio")
+                return
+            end
+            cajones.push(r)
+        end
+    end
+    cambios = 0
+    for c in cajones
+        hallado = false
+        # ficheros nuevos o cambiados
+        for f in todos
+            if dentro_de(f.ruta, c)
+                hallado = true
+                p = indice_buscar(idx, f.ruta)
+                if p >= 0 or not ignorada(f.ruta) or f.ruta == c
+                    if p >= 0 and idx[p].tam == f.tam and idx[p].mtime == f.mtime
+                        # sin cambios
+                    else
+                        id = trabajo_guardar(f.ruta, true)
+                        if id == ""
+                            aviso("no se puede leer " + utf8_to_latin1(f.ruta))
+                            return
+                        end
+                        if p < 0
+                            e = EntradaIndice()
+                            e.ruta = f.ruta
+                            idx.push(e)
+                            p = idx.length - 1
+                            cambios = cambios + 1
+                        elif idx[p].id != id
+                            cambios = cambios + 1
+                        end
+                        idx[p].id = id
+                        idx[p].tam = f.tam
+                        idx[p].mtime = f.mtime
+                        idx[p].ctime = f.mtime
+                        idx[p].mtime_ns = 0
+                        idx[p].ctime_ns = 0
+                    end
+                end
+            end
+        end
+        # borrados del árbol de trabajo
+        i = idx.length - 1
+        while i >= 0
+            if dentro_de(idx[i].ruta, c)
+                hallado = true
+                esta = false
+                for f in todos
+                    if f.ruta == idx[i].ruta
+                        esta = true
+                        break
+                    end
+                end
+                if not esta
+                    idx.remove(i)
+                    cambios = cambios + 1
+                end
+            end
+            i = i - 1
+        end
+        if not hallado
+            aviso("ningún fichero encaja con " + utf8_to_latin1(c))
+        end
+    end
+    if not indice_escribir(idx)
+        aviso("no se pudo escribir el índice")
+    end
+end
+
+# ---- rm ----
+
+func orden_rm(args: [String])
+    solo_indice = false
+    var rutas: [String] = []
+    for a in args
+        if a == "--cached"
+            solo_indice = true
+        elif a != "-r" and a != "-f"
+            rutas.push(ruta_git(a))
+        end
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return
+    end
+    for r in rutas
+        hallado = false
+        i = idx.length - 1
+        while i >= 0
+            if dentro_de(idx[i].ruta, r)
+                hallado = true
+                Print "rm '" + utf8_to_latin1(idx[i].ruta) + "'"
+                if not solo_indice
+                    file_delete(ruta_amiga(idx[i].ruta))
+                end
+                idx.remove(i)
+            end
+            i = i - 1
+        end
+        if not hallado
+            aviso(utf8_to_latin1(r) + " no está en el índice")
+        end
+    end
+    indice_escribir(idx)
+end
+
+# ---- status ----
+
+struct Estado
+    preparados: [String] = []    # "nuevo: x", "cambiado: x", "borrado: x" (corto: "A  x"...)
+    sin_preparar: [String] = []
+    nuevos: [String] = []
+end
+
+# Compara HEAD, el índice y el árbol de trabajo. corto: las líneas como git status -s.
+func estado(corto: Bool) -> Estado
+    r = Estado()
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return nil
+    end
+    var cab: [EntradaIndice] = ficheros_de_commit(head_id())
+    if cab == nil
+        aviso("falta algún objeto del commit de HEAD")
+        return nil
+    end
+    # HEAD contra el índice
+    var en_cab: {String: Int} = {}
+    i = 0
+    while i < cab.length
+        en_cab[cab[i].ruta] = i + 1
+        i = i + 1
+    end
+    for e in idx
+        p = en_cab.get(e.ruta, 0)
+        if p == 0
+            r.preparados.push(_linea(corto, "A ", "nuevo:      ", e.ruta))
+        elif cab[p - 1].id != e.id or cab[p - 1].modo != e.modo
+            r.preparados.push(_linea(corto, "M ", "cambiado:   ", e.ruta))
+        end
+    end
+    var en_idx: {String: Int} = {}
+    i = 0
+    while i < idx.length
+        en_idx[idx[i].ruta] = i + 1
+        i = i + 1
+    end
+    for e in cab
+        if en_idx.get(e.ruta, 0) == 0
+            r.preparados.push(_linea(corto, "D ", "borrado:    ", e.ruta))
+        end
+    end
+    # el índice contra el árbol de trabajo
+    var todos: [FicheroTrabajo] = trabajo_listar("")
+    var en_trabajo: {String: Int} = {}
+    i = 0
+    while i < todos.length
+        en_trabajo[todos[i].ruta] = i + 1
+        i = i + 1
+    end
+    refrescar = false
+    for e in idx
+        p = en_trabajo.get(e.ruta, 0)
+        if p == 0
+            r.sin_preparar.push(_linea(corto, " D", "borrado:    ", e.ruta))
+        else
+            f = todos[p - 1]
+            if f.tam != e.tam
+                r.sin_preparar.push(_linea(corto, " M", "cambiado:   ", e.ruta))
+            elif f.mtime != e.mtime
+                if trabajo_guardar(e.ruta, false) != e.id
+                    r.sin_preparar.push(_linea(corto, " M", "cambiado:   ", e.ruta))
+                else
+                    e.mtime = f.mtime
+                    e.mtime_ns = 0
+                    refrescar = true
+                end
+            end
+        end
+    end
+    for f in todos
+        if en_idx.get(f.ruta, 0) == 0 and not ignorada(f.ruta)
+            if corto
+                r.nuevos.push("?? " + f.ruta)
+            else
+                r.nuevos.push(f.ruta)
+            end
+        end
+    end
+    if refrescar
+        indice_escribir(idx)
+    end
+    return r
+end
+
+func _linea(corto: Bool, xy: String, largo: String, ruta: String) -> String
+    if corto
+        return xy + " " + ruta
+    end
+    return largo + ruta
+end
+
+func orden_status(args: [String])
+    corto = false
+    for a in args
+        if a == "-s" or a == "--short" or a == "--porcelain"
+            corto = true
+        end
+    end
+    e = estado(corto)
+    if e == nil
+        return
+    end
+    if corto
+        for l in e.preparados
+            Print utf8_to_latin1(l)
+        end
+        for l in e.sin_preparar
+            Print utf8_to_latin1(l)
+        end
+        for l in e.nuevos
+            Print utf8_to_latin1(l)
+        end
+        return
+    end
+    rama = head_rama()
+    if rama == ""
+        Print "HEAD suelto en " + head_id()[:7]
+    else
+        Print "En la rama " + rama[11:]
+    end
+    if head_id() == ""
+        Print "Aún no hay commits"
+    end
+    if e.preparados.length > 0
+        Print ""
+        Print "Cambios para el commit:"
+        for l in e.preparados
+            Print "        " + utf8_to_latin1(l)
+        end
+    end
+    if e.sin_preparar.length > 0
+        Print ""
+        Print "Cambios sin añadir (dashgit add):"
+        for l in e.sin_preparar
+            Print "        " + utf8_to_latin1(l)
+        end
+    end
+    if e.nuevos.length > 0
+        Print ""
+        Print "Ficheros sin seguimiento:"
+        for l in e.nuevos
+            Print "        " + utf8_to_latin1(l)
+        end
+    end
+    if e.preparados.length == 0 and e.sin_preparar.length == 0 and e.nuevos.length == 0
+        Print "No hay nada que confirmar: el árbol de trabajo está limpio"
+    end
+end
+
+# ---- commit ----
+
+func orden_commit(args: [String])
+    mensaje = ""
+    todo = false
+    i = 0
+    while i < args.length
+        if args[i] == "-m" and i + 1 < args.length
+            if mensaje != ""
+                mensaje = mensaje + "\n\n"
+            end
+            mensaje = mensaje + args[i + 1]
+            i = i + 1
+        elif args[i] == "-a"
+            todo = true
+        elif args[i] == "-am" and i + 1 < args.length
+            todo = true
+            mensaje = args[i + 1]
+            i = i + 1
+        end
+        i = i + 1
+    end
+    if mensaje == ""
+        aviso("falta el mensaje: dashgit commit -m \"mensaje\"")
+        return
+    end
+    firma = firma_ahora()
+    if firma == ""
+        aviso("dime quién eres:")
+        Print "  dashgit config --global user.name \"Tu nombre\""
+        Print "  dashgit config --global user.email tu@correo"
+        return
+    end
+    if todo
+        # como add de lo que ya está en el índice
+        var idx0: [EntradaIndice] = indice_leer()
+        var rutas: [String] = []
+        for e in idx0
+            rutas.push(e.ruta)
+        end
+        _add_seguidos(idx0)
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return
+    end
+    padre = head_id()
+    arbol = arbol_del_indice(idx)
+    if arbol == ""
+        aviso("no se pudo guardar el árbol")
+        return
+    end
+    var padres: [String] = []
+    if padre != ""
+        if commit_arbol(padre) == arbol
+            Print "No hay cambios para el commit (dashgit add para añadirlos)"
+            return
+        end
+        padres.push(padre)
+    end
+    id = commit_crear(arbol, padres, latin1_to_utf8(firma), latin1_to_utf8(mensaje))
+    if id == ""
+        aviso("no se pudo guardar el commit")
+        return
+    end
+    rama = head_rama()
+    if rama == ""
+        file_write_text(git_dir + "/HEAD", id + "\n")
+    else
+        ref_escribir(rama, id)
+    end
+    nombre = "HEAD suelto"
+    if rama != ""
+        nombre = rama[11:]
+    end
+    raiz_txt = ""
+    if padre == ""
+        raiz_txt = " (primer commit)"
+    end
+    primera = mensaje
+    nl = str_find(primera, "\n")
+    if nl >= 0
+        primera = primera[:nl]
+    end
+    Print "[" + nombre + raiz_txt + " " + id[:7] + "] " + primera
+end
+
+# add de los ficheros que ya sigue el índice (commit -a)
+func _add_seguidos(idx: [EntradaIndice])
+    var todos: [FicheroTrabajo] = trabajo_listar("")
+    var en_trabajo: {String: Int} = {}
+    i = 0
+    while i < todos.length
+        en_trabajo[todos[i].ruta] = i + 1
+        i = i + 1
+    end
+    i = idx.length - 1
+    while i >= 0
+        p = en_trabajo.get(idx[i].ruta, 0)
+        if p == 0
+            idx.remove(i)
+        else
+            f = todos[p - 1]
+            if f.tam != idx[i].tam or f.mtime != idx[i].mtime
+                idx[i].id = trabajo_guardar(idx[i].ruta, true)
+                idx[i].tam = f.tam
+                idx[i].mtime = f.mtime
+                idx[i].mtime_ns = 0
+            end
+        end
+        i = i - 1
+    end
+    indice_escribir(idx)
+end
+
+# ---- log ----
+
+func orden_log(args: [String])
+    corto = false
+    max = -1
+    desde = "HEAD"
+    i = 0
+    while i < args.length
+        a = args[i]
+        if a == "--oneline"
+            corto = true
+        elif a == "-n" and i + 1 < args.length
+            max = Int(args[i + 1])
+            i = i + 1
+        elif str_starts(a, "-") and a.length > 1 and str_to_int(a[1:], 10) > 0
+            max = str_to_int(a[1:], 10)
+        else
+            desde = a
+        end
+        i = i + 1
+    end
+    id = resolver(desde)
+    if id == ""
+        if desde == "HEAD"
+            Print "Aún no hay commits"
+        else
+            aviso("no existe " + desde)
+        end
+        return
+    end
+    vistos = 0
+    while id != "" and (max < 0 or vistos < max)
+        o = objeto_leer(id)
+        if o == nil
+            aviso("falta el commit " + id)
+            return
+        end
+        msg = utf8_to_latin1(commit_mensaje(o))
+        if corto
+            nl = str_find(msg, "\n")
+            if nl >= 0
+                msg = msg[:nl]
+            end
+            Print id[:7] + " " + msg
+        else
+            Print "commit " + id
+            autor = commit_campo(o, "author")
+            Print "Autor: " + utf8_to_latin1(firma_quien(autor))
+            Print "Fecha: " + firma_fecha(autor)
+            Print ""
+            for l in str_split(str_trim(msg), "\n")
+                Print "    " + l
+            end
+            Print ""
+        end
+        var ps: [String] = commit_padres(o)
+        objeto_libre(o)
+        id = ""
+        if ps.length > 0
+            id = ps[0]
+        end
+        vistos = vistos + 1
+    end
+end
+
+# ---- branch ----
+
+func ramas() -> [String]
+    var r: [String] = []
+    _ramas_en("refs/heads", r)
+    p = git_dir + "/packed-refs"
+    if file_exists(p)
+        for l in str_split(file_read_text(p), "\n")
+            if l.length > 52 and es_id(l[:40]) and str_starts(l[41:], "refs/heads/")
+                n = l[52:]
+                esta = false
+                for x in r
+                    if x == n
+                        esta = true
+                    end
+                end
+                if not esta
+                    r.push(n)
+                end
+            end
+        end
+    end
+    r.sort(fn(a, b) -> a < b)
+    return r
+end
+
+func _ramas_en(rel: String, r: [String])
+    n = dir_read(git_dir + "/" + rel)
+    var cajones: [String] = []
+    i = 0
+    while i < n
+        nombre = dir_entry_name(i)
+        if dir_entry_is_dir(i)
+            cajones.push(rel + "/" + nombre)
+        elif not str_ends(nombre, ".lock") and not str_ends(nombre, ".uaem")
+            r.push((rel + "/" + nombre)[11:])
+        end
+        i = i + 1
+    end
+    for c in cajones
+        _ramas_en(c, r)
+    end
+end
+
+func orden_branch(args: [String])
+    if args.length == 0
+        actual = head_rama()
+        for b in ramas()
+            if "refs/heads/" + b == actual
+                Print "* " + b
+            else
+                Print "  " + b
+            end
+        end
+        return
+    end
+    if args[0] == "-d" or args[0] == "-D"
+        if args.length < 2
+            aviso("uso: branch -d rama")
+            return
+        end
+        n = args[1]
+        if "refs/heads/" + n == head_rama()
+            aviso("no se puede borrar la rama en la que estás: " + n)
+            return
+        end
+        id = ref_leer("refs/heads/" + n)
+        if id == ""
+            aviso("no existe la rama " + n)
+            return
+        end
+        file_delete(git_dir + "/refs/heads/" + n)
+        Print "Rama " + n + " borrada (era " + id[:7] + ")"
+        return
+    end
+    n = args[0]
+    desde = "HEAD"
+    if args.length > 1
+        desde = args[1]
+    end
+    if ref_leer("refs/heads/" + n) != ""
+        aviso("ya existe la rama " + n)
+        return
+    end
+    id = resolver(desde)
+    if id == ""
+        aviso("no hay commit en " + desde)
+        return
+    end
+    ref_escribir("refs/heads/" + n, id)
+end
+
+# ---- checkout ----
+
+# Pasa el árbol de trabajo y el índice de los ficheros de "antes" a los de "despues"; false si hay cambios que se
+# perderían (no toca nada)
+func cambiar_arbol(antes: [EntradaIndice], despues: [EntradaIndice]) -> Bool
+    e = estado(true)
+    if e == nil
+        return false
+    end
+    var tocados: {String: Int} = {}
+    for l in e.preparados
+        tocados[l[3:]] = 1
+    end
+    for l in e.sin_preparar
+        tocados[l[3:]] = 1
+    end
+    var en_antes: {String: Int} = {}
+    i = 0
+    while i < antes.length
+        en_antes[antes[i].ruta] = i + 1
+        i = i + 1
+    end
+    var en_despues: {String: Int} = {}
+    i = 0
+    while i < despues.length
+        en_despues[despues[i].ruta] = i + 1
+        i = i + 1
+    end
+    # ¿se perdería algo?
+    var mal: [String] = []
+    for d in despues
+        p = en_antes.get(d.ruta, 0)
+        if (p == 0 or antes[p - 1].id != d.id) and tocados.get(d.ruta, 0) == 1
+            mal.push(d.ruta)
+        end
+        if p == 0 and tocados.get(d.ruta, 0) == 0 and file_exists(ruta_amiga(d.ruta))
+            # un fichero sin seguimiento que se pisaría
+            if trabajo_guardar(d.ruta, false) != d.id
+                mal.push(d.ruta)
+            end
+        end
+    end
+    for a in antes
+        if en_despues.get(a.ruta, 0) == 0 and tocados.get(a.ruta, 0) == 1
+            mal.push(a.ruta)
+        end
+    end
+    if mal.length > 0
+        aviso("estos ficheros tienen cambios que se perderían:")
+        for m in mal
+            Print "        " + utf8_to_latin1(m)
+        end
+        Print "Haz commit de ellos o deshazlos antes de cambiar."
+        return false
+    end
+    # quitar lo que ya no está
+    for a in antes
+        if en_despues.get(a.ruta, 0) == 0
+            file_delete(ruta_amiga(a.ruta))
+            _quitar_cajones_vacios(ruta_padre(ruta_amiga(a.ruta)))
+        end
+    end
+    # escribir lo nuevo o cambiado, y el índice
+    var idx: [EntradaIndice] = []
+    for d in despues
+        p = en_antes.get(d.ruta, 0)
+        if p == 0 or antes[p - 1].id != d.id or not file_exists(ruta_amiga(d.ruta))
+            if not escribir_fichero(d)
+                aviso("no se pudo escribir " + utf8_to_latin1(d.ruta))
+                return false
+            end
+        end
+        f = trabajo_mirar(d.ruta)
+        x = EntradaIndice()
+        x.ruta = d.ruta
+        x.id = d.id
+        x.modo = d.modo
+        x.tam = f.tam
+        x.mtime = f.mtime
+        x.ctime = f.mtime
+        idx.push(x)
+    end
+    indice_escribir(idx)
+    return true
+end
+
+func _quitar_cajones_vacios(d: String)
+    c = d
+    while str_lower(c) != str_lower(raiz) and c != ""
+        if dir_read(c) != 0
+            return
+        end
+        file_delete(c)
+        c = ruta_padre(c)
+    end
+end
+
+# Escribe un fichero del árbol de trabajo desde su blob
+func escribir_fichero(e: EntradaIndice) -> Bool
+    if e.modo == MODO_ENLACE or e.modo == MODO_SUBMODULO
+        aviso("se salta " + utf8_to_latin1(e.ruta) + " (enlace o submódulo)")
+        return true
+    end
+    o = objeto_leer(e.id)
+    if o == nil
+        return false
+    end
+    ruta = ruta_amiga(e.ruta)
+    crear_cajones(ruta_padre(ruta))
+    ok = file_save(ruta, o.datos, o.n) == o.n
+    objeto_libre(o)
+    return ok
+end
+
+func orden_checkout(args: [String])
+    if args.length == 0
+        aviso("uso: checkout rama | checkout -b rama nueva | checkout -- fichero")
+        return
+    end
+    # checkout -- fichero: devolverlo como está en el índice
+    if args[0] == "--"
+        var idx: [EntradaIndice] = indice_leer()
+        i = 1
+        while i < args.length
+            r = ruta_git(args[i])
+            hallado = false
+            for e in idx
+                if dentro_de(e.ruta, r)
+                    hallado = true
+                    escribir_fichero(e)
+                    f = trabajo_mirar(e.ruta)
+                    e.tam = f.tam
+                    e.mtime = f.mtime
+                end
+            end
+            if not hallado
+                aviso(args[i] + " no está en el índice")
+            end
+            i = i + 1
+        end
+        indice_escribir(idx)
+        return
+    end
+    nueva = ""
+    destino = args[0]
+    if args[0] == "-b"
+        if args.length < 2
+            aviso("uso: checkout -b rama")
+            return
+        end
+        nueva = args[1]
+        if ref_leer("refs/heads/" + nueva) != ""
+            aviso("ya existe la rama " + nueva)
+            return
+        end
+        destino = "HEAD"
+        if args.length > 2
+            destino = args[2]
+        end
+    end
+    id = resolver(destino)
+    if id == ""
+        aviso("no existe " + destino)
+        return
+    end
+    actual = head_id()
+    if id != actual
+        var antes: [EntradaIndice] = ficheros_de_commit(actual)
+        var despues: [EntradaIndice] = ficheros_de_commit(id)
+        if antes == nil or despues == nil
+            aviso("falta algún objeto")
+            return
+        end
+        if not cambiar_arbol(antes, despues)
+            return
+        end
+    end
+    if nueva != ""
+        ref_escribir("refs/heads/" + nueva, id)
+        file_write_text(git_dir + "/HEAD", "ref: refs/heads/" + nueva + "\n")
+        Print "Cambiado a la rama nueva " + nueva
+    elif ref_leer("refs/heads/" + destino) != ""
+        file_write_text(git_dir + "/HEAD", "ref: refs/heads/" + destino + "\n")
+        Print "Cambiado a la rama " + destino
+    else
+        file_write_text(git_dir + "/HEAD", id + "\n")
+        Print "HEAD suelto en " + id[:7]
+    end
+end
