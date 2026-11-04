@@ -127,8 +127,12 @@ func crear_cajones(ruta: String) -> Bool
     if str_ends(p, "/")
         p = p[:p.length - 1]
     end
-    if p == "" or str_ends(p, ":") or file_exists(p)
+    if p == "" or str_ends(p, ":")
         return true
+    end
+    if file_exists(p)
+        # que sea un cajón, no un fichero con ese nombre
+        return dir_read(p) >= 0
     end
     padre = ruta_padre(p)
     if padre != "" and not file_exists(padre)

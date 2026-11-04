@@ -116,6 +116,15 @@ func orden_add(args: [String])
                             return
                         end
                         if p < 0
+                            # lo que choque con esta ruta sale del índice: un fichero "a" si se añade "a/x", o lo
+                            # de dentro de "a/" si se añade el fichero "a" (como git)
+                            q = idx.length - 1
+                            while q >= 0
+                                if str_starts(f.ruta, idx[q].ruta + "/") or str_starts(idx[q].ruta, f.ruta + "/")
+                                    idx.remove(q)
+                                end
+                                q = q - 1
+                            end
                             e = EntradaIndice()
                             e.ruta = f.ruta
                             idx.push(e)
@@ -520,7 +529,9 @@ func orden_commit(args: [String])
         for e in idx0
             rutas.push(e.ruta)
         end
-        _add_seguidos(idx0)
+        if not _add_seguidos(idx0)
+            return
+        end
     end
     var idx: [EntradaIndice] = indice_leer()
     if idx == nil
@@ -575,8 +586,8 @@ func orden_commit(args: [String])
     Print "[" + nombre + raiz_txt + " " + id[:7] + "] " + primera
 end
 
-# add de los ficheros que ya sigue el índice (commit -a)
-func _add_seguidos(idx: [EntradaIndice])
+# add de los ficheros que ya sigue el índice (commit -a); false si alguno no se pudo leer
+func _add_seguidos(idx: [EntradaIndice]) -> Bool
     var todos: [FicheroTrabajo] = trabajo_listar("")
     var en_trabajo: {String: Int} = {}
     i = 0
@@ -592,7 +603,12 @@ func _add_seguidos(idx: [EntradaIndice])
         else
             f = todos[p - 1]
             if f.tam != idx[i].tam or f.mtime != idx[i].mtime
-                idx[i].id = trabajo_guardar(idx[i].ruta, true)
+                id = trabajo_guardar(idx[i].ruta, true)
+                if id == ""
+                    aviso("no se puede leer " + utf8_to_latin1(idx[i].ruta) + "; no se hace el commit")
+                    return false
+                end
+                idx[i].id = id
                 idx[i].tam = f.tam
                 idx[i].mtime = f.mtime
                 idx[i].mtime_ns = 0
@@ -600,7 +616,7 @@ func _add_seguidos(idx: [EntradaIndice])
         end
         i = i - 1
     end
-    indice_escribir(idx)
+    return indice_escribir(idx)
 end
 
 # ---- log ----
@@ -771,6 +787,10 @@ end
 # mirar: comprobar antes que no se pierden cambios (no hace falta en un clon recién hecho)
 func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: Bool) -> Bool
     var tocados: {String: Int} = {}
+    # lo que hay ahora en el índice: lo que no cambia entre los dos árboles se queda como está (con lo que el
+    # usuario tenga añadido o sin añadir), como hace git
+    var actual: {String: Int} = {}
+    var idx_actual: [EntradaIndice] = []
     if mirar
         e = estado(true)
         if e == nil
@@ -785,6 +805,12 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         end
         for l in e.sin_preparar
             tocados[l[3:]] = 1
+        end
+        idx_actual = indice_leer()
+        i = 0
+        while i < idx_actual.length
+            actual[idx_actual[i].ruta] = i + 1
+            i = i + 1
         end
     end
     var en_antes: {String: Int} = {}
@@ -806,9 +832,15 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         if (p == 0 or antes[p - 1].id != d.id) and tocados.get(d.ruta, 0) == 1
             mal.push(d.ruta)
         end
-        if p == 0 and tocados.get(d.ruta, 0) == 0 and file_exists(ruta_amiga(d.ruta))
-            # un fichero sin seguimiento que se pisaría
-            if trabajo_guardar(d.ruta, false) != d.id
+        ruta = ruta_amiga(d.ruta)
+        if p == 0 and tocados.get(d.ruta, 0) == 0 and file_exists(ruta)
+            if dir_read(ruta) >= 0
+                # un cajón donde irá un fichero: solo si es de antes y se va a vaciar
+                if not _cajon_se_vacia(d.ruta, antes, en_despues)
+                    mal.push(d.ruta + " (hay un cajón con ese nombre)")
+                end
+            elif trabajo_guardar(d.ruta, false) != d.id
+                # un fichero sin seguimiento que se pisaría
                 mal.push(d.ruta)
             end
         end
@@ -826,7 +858,7 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         Print "Haz commit de ellos o deshazlos antes de cambiar."
         return false
     end
-    # quitar lo que ya no está
+    # quitar lo que ya no está (antes de escribir: un fichero "a" puede dejar sitio a un cajón "a/")
     for a in antes
         if en_despues.get(a.ruta, 0) == 0
             file_delete(ruta_amiga(a.ruta))
@@ -835,26 +867,62 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
     end
     # escribir lo nuevo o cambiado, y el índice
     var idx: [EntradaIndice] = []
+    fallo = ""
     for d in despues
         p = en_antes.get(d.ruta, 0)
-        if p == 0 or antes[p - 1].id != d.id or not file_exists(ruta_amiga(d.ruta))
+        cambia = p == 0 or antes[p - 1].id != d.id
+        q = actual.get(d.ruta, 0)
+        if not cambia and mirar
+            # igual en los dos commits: se queda lo que tenga el usuario (también si lo borró del disco)
+            if q > 0
+                idx.push(idx_actual[q - 1])
+            end
+        elif fallo == ""
             if not escribir_fichero(d)
-                aviso("no se pudo escribir " + utf8_to_latin1(d.ruta))
-                return false
+                fallo = d.ruta
+            else
+                f = trabajo_mirar(d.ruta)
+                x = EntradaIndice()
+                x.ruta = d.ruta
+                x.id = d.id
+                x.modo = d.modo
+                x.tam = f.tam
+                x.mtime = f.mtime
+                x.ctime = f.mtime
+                idx.push(x)
             end
         end
-        f = trabajo_mirar(d.ruta)
-        x = EntradaIndice()
-        x.ruta = d.ruta
-        x.id = d.id
-        x.modo = d.modo
-        x.tam = f.tam
-        x.mtime = f.mtime
-        x.ctime = f.mtime
-        idx.push(x)
+    end
+    # lo añadido que no está en ninguno de los dos commits (un fichero nuevo con add) se queda en el índice
+    if mirar
+        for x in idx_actual
+            if x.etapa == 0 and en_antes.get(x.ruta, 0) == 0 and en_despues.get(x.ruta, 0) == 0
+                idx.push(x)
+            end
+        end
+    end
+    if fallo != ""
+        # el índice dice lo que de verdad quedó en el disco; lo que no se escribió sale como borrado
+        indice_escribir(idx)
+        aviso("no se pudo escribir " + utf8_to_latin1(fallo) + " (¿nombre que el disco no admite, disco lleno?); el cambio quedó a medias: dashgit status")
+        return false
     end
     indice_escribir(idx)
     return true
+end
+
+# Si todo lo que hay en el cajón rel sale de antes y no está en despues (el cajón se quedará vacío)
+func _cajon_se_vacia(rel: String, antes: [EntradaIndice], en_despues: {String: Int}) -> Bool
+    hay = false
+    for a in antes
+        if str_starts(a.ruta, rel + "/")
+            hay = true
+            if en_despues.get(a.ruta, 0) != 0
+                return false
+            end
+        end
+    end
+    return hay
 end
 
 func _quitar_cajones_vacios(d: String)

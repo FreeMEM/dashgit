@@ -21,6 +21,8 @@ En FS-UAE, con `DASH_KICKSTART` apuntando a una ROM de Kickstart 3.1:
     tests/diff.sh [cajón de Dash]
     tests/fase3.sh [cajón de Dash]
     tests/fusion.sh [cajón de Dash]
+    tests/raros.sh [cajón de Dash]
+    tests/arreglos.sh [cajón de Dash]
     tests/fase4.sh [cajón de Dash]     # red, contra un servidor git en el PC
 
 ## Licencia

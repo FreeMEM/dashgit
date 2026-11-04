@@ -16,38 +16,62 @@ func _padres_de(id: String) -> [String]
     return r
 end
 
-# Un antepasado común de a y b (el más cercano a b por anchura); "" si no tienen
-func base_comun(a: String, b: String) -> String
-    var de_a: {String: Int} = {}
-    var cola: [String] = [a]
+# Los antepasados de id (con él), en un conjunto
+func _antepasados(id: String, r: {String: Int})
+    var cola: [String] = [id]
     i = 0
-    while i < cola.length and i < 50000
-        id = cola[i]
+    while i < cola.length
+        x = cola[i]
         i = i + 1
-        if de_a.get(id, 0) == 0
-            de_a[id] = 1
-            for p in _padres_de(id)
+        if r.get(x, 0) == 0
+            r[x] = 1
+            for p in _padres_de(x)
                 cola.push(p)
             end
         end
     end
+end
+
+# El mejor antepasado común de a y b: uno común que no es antepasado de otro común (como git merge-base); "" si
+# no tienen
+func base_comun(a: String, b: String) -> String
+    var de_a: {String: Int} = {}
+    _antepasados(a, de_a)
+    # los comunes, en el orden en que se encuentran desde b
+    var comunes: [String] = []
     var vistos: {String: Int} = {}
-    var cola2: [String] = [b]
+    var cola: [String] = [b]
     i = 0
-    while i < cola2.length and i < 50000
-        id = cola2[i]
+    while i < cola.length
+        x = cola[i]
         i = i + 1
-        if de_a.get(id, 0) == 1
-            return id
-        end
-        if vistos.get(id, 0) == 0
-            vistos[id] = 1
-            for p in _padres_de(id)
-                cola2.push(p)
+        if vistos.get(x, 0) == 0
+            vistos[x] = 1
+            if de_a.get(x, 0) == 1
+                comunes.push(x)
+            else
+                for p in _padres_de(x)
+                    cola.push(p)
+                end
             end
         end
     end
-    return ""
+    if comunes.length == 0
+        return ""
+    end
+    # fuera los que son antepasados de otro común
+    var sobran: {String: Int} = {}
+    for c in comunes
+        for p in _padres_de(c)
+            _antepasados(p, sobran)
+        end
+    end
+    for c in comunes
+        if sobran.get(c, 0) == 0
+            return c
+        end
+    end
+    return comunes[0]
 end
 
 # ---- fusión de tres vías de un texto ----
@@ -219,6 +243,8 @@ end
 
 # ---- leer y escribir textos por líneas, sin perder el último salto ----
 
+const SIN_SALTO = "@@dashgit-sin-salto-final@@"   # una marca que no aparece en un texto normal
+
 struct Texto3
     lineas: [String] = []
     salto_final: Bool = true
@@ -248,7 +274,8 @@ func texto_de(id: String) -> Texto3
     while i < o.n
         nl = buffer_find_byte(o.datos, i, o.n, 10)
         if nl < 0
-            t.lineas.push(str_from_buffer(o.datos, i, o.n - i))
+            # sin salto final: la última línea lleva una marca, para que "y" y "y\n" no se den por iguales
+            t.lineas.push(str_from_buffer(o.datos, i, o.n - i) + SIN_SALTO)
             t.salto_final = false
             i = o.n
         else
@@ -260,14 +287,19 @@ func texto_de(id: String) -> Texto3
     return t
 end
 
-# Guarda unas líneas como blob; su id
-func blob_de_lineas(l: [String], salto_final: Bool) -> String
+# Guarda unas líneas como blob (la que lleva SIN_SALTO va sin salto de línea detrás); su id
+func blob_de_lineas(l: [String]) -> String
     s = ""
     i = 0
     while i < l.length
-        s = s + l[i]
-        if i < l.length - 1 or salto_final
-            s = s + "\n"
+        x = l[i]
+        if str_ends(x, SIN_SALTO)
+            s = s + x[:x.length - SIN_SALTO.length]
+            if i < l.length - 1
+                s = s + "\n"
+            end
+        else
+            s = s + x + "\n"
         end
         i = i + 1
     end
@@ -374,7 +406,7 @@ func fusionar_commits(base: String, nuestro: String, suyo: String, nombre_suyo: 
                 ts = texto_de(isu)
                 if not tb.binario and not tn.binario and not ts.binario
                     f = fusionar_lineas(tb.lineas, tn.lineas, ts.lineas, nombre_suyo)
-                    id = blob_de_lineas(f.lineas, tn.salto_final)
+                    id = blob_de_lineas(f.lineas)
                     if f.conflictos == 0
                         r.ficheros.push(_entrada(ruta, id, modo_n, 0))
                         hecho = true
@@ -580,4 +612,23 @@ func orden_merge(args: [String])
         destino = " into " + rama[11:]
     end
     fusionar(suyo, nombre, "Merge branch '" + nombre + "'" + destino)
+end
+
+func orden_merge_base(args: [String])
+    if args.length < 2
+        aviso("uso: merge-base commit commit")
+        return
+    end
+    a = resolver(args[0])
+    b = resolver(args[1])
+    if a == "" or b == ""
+        aviso("no existe alguno de los dos")
+        return
+    end
+    m = base_comun(a, b)
+    if m == ""
+        codigo = 1
+        return
+    end
+    Print m
 end
