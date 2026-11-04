@@ -1,0 +1,921 @@
+# dashgit - la red: protocolo "smart" de git por HTTP, clone, fetch, pull y push
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "diff.dash"
+import "http.dash"
+
+const CERO = "0000000000000000000000000000000000000000"
+
+# ---- credenciales ----
+
+# "Authorization: Basic ...\r\n" para un host, o "" si no hay credenciales
+func autorizacion(host: String) -> String
+    u = env_get("DASHGIT_USUARIO")
+    t = env_get("DASHGIT_TOKEN")
+    if t == ""
+        for f in ["ENV:dashgit/credenciales", "ENVARC:dashgit/credenciales"]
+            if t == "" and file_exists(f)
+                # formato netrc: machine host login usuario password token
+                var p: [String] = str_split(str_replace(str_replace(file_read_text(f), "\n", " "), "\t", " "), " ")
+                maquina = ""
+                i = 0
+                while i < p.length - 1
+                    if p[i] == "machine"
+                        maquina = p[i + 1]
+                    elif maquina == host and p[i] == "login"
+                        u = p[i + 1]
+                    elif maquina == host and p[i] == "password"
+                        t = p[i + 1]
+                    end
+                    i = i + 1
+                end
+            end
+        end
+    end
+    if t == ""
+        return ""
+    end
+    if u == ""
+        u = "dashgit"
+    end
+    return "Authorization: Basic " + base64(u + ":" + t) + "\r\n"
+end
+
+# ---- pkt-line ----
+
+func pkt(s: String) -> String
+    n = s.length + 4
+    h = str_from_int(n, 16)
+    while h.length < 4
+        h = "0" + h
+    end
+    return h + s
+end
+
+struct Lector
+    b: Pointer = nil
+    n: Int = 0
+    i: Int = 0
+end
+
+# El largo del siguiente paquete (sin los 4 de la cabecera); -1 si es el flush "0000", -2 si se acabó o está mal.
+# Deja l.i al principio de sus datos.
+func pkt_siguiente(l: Lector) -> Int
+    if l.i + 4 > l.n
+        return -2
+    end
+    t = str_to_int(str_from_buffer(l.b, l.i, 4), 16)
+    l.i = l.i + 4
+    if t == 0
+        return -1
+    end
+    if t < 4 or l.i + t - 4 > l.n
+        return -2
+    end
+    return t - 4
+end
+
+# ---- descubrir las referencias del servidor ----
+
+struct RefRemota
+    nombre: String = ""
+    id: String = ""
+end
+
+struct Remoto
+    url: String = ""
+    refs: [RefRemota] = []
+    caps: String = ""
+    cabeza: String = ""     # a qué rama apunta su HEAD ("refs/heads/main")
+    error: String = ""
+end
+
+func remoto_ref(r: Remoto, nombre: String) -> String
+    for x in r.refs
+        if x.nombre == nombre
+            return x.id
+        end
+    end
+    return ""
+end
+
+# GET info/refs; servicio: "git-upload-pack" o "git-receive-pack"
+func descubrir(url: String, servicio: String) -> Remoto
+    r = Remoto()
+    r.url = url
+    u = url_partir(url)
+    if u == nil
+        r.error = "solo se admiten direcciones http:// y https://"
+        return r
+    end
+    auth = autorizacion(u.host)
+    resp = http_pedir("GET", url + "/info/refs?service=" + servicio, "", nil, auth)
+    if resp.estado == 0
+        r.error = resp.error
+        return r
+    end
+    if resp.estado == 401 or resp.estado == 403
+        if auth == ""
+            r.error = "el servidor pide usuario y token (dashgit config --global, ver el LEEME)"
+        else
+            r.error = "el servidor no acepta el usuario o el token"
+        end
+        respuesta_libre(resp)
+        return r
+    end
+    if resp.estado != 200
+        r.error = "el servidor contesta " + str_from_int(resp.estado, 10)
+        respuesta_libre(resp)
+        return r
+    end
+    if not str_contains(cabecera(resp, "content-type"), "application/x-" + servicio + "-advertisement")
+        r.error = "el servidor no habla el protocolo smart de git"
+        respuesta_libre(resp)
+        return r
+    end
+    l = Lector()
+    l.b = resp.cuerpo.buf
+    l.n = resp.cuerpo.n
+    primera = true
+    while true
+        t = pkt_siguiente(l)
+        if t == -2
+            break
+        end
+        if t >= 0
+            linea = str_from_buffer(l.b, l.i, t)
+            cero = buffer_find_byte(l.b, l.i, l.i + t, 0)
+            l.i = l.i + t
+            if str_ends(linea, "\n")
+                linea = linea[:linea.length - 1]
+            end
+            if str_starts(linea, "# service=")
+                # la línea del servicio, y detrás un flush
+            else
+                if cero >= 0
+                    # str_from_buffer cambia el 0 por un espacio: lo de detrás son las capacidades
+                    pos = cero - (l.i - t)
+                    r.caps = " " + linea[pos + 1:] + " "
+                    linea = linea[:pos]
+                end
+                esp = str_find(linea, " ")
+                if esp == 40 and not str_ends(linea, "^{}")
+                    x = RefRemota()
+                    x.id = linea[:40]
+                    x.nombre = linea[41:]
+                    if x.nombre != "capabilities^{}"
+                        r.refs.push(x)
+                    end
+                end
+            end
+        end
+    end
+    respuesta_libre(resp)
+    s = str_find(r.caps, " symref=HEAD:")
+    if s >= 0
+        resto = r.caps[s + 13:]
+        r.cabeza = resto[:str_find(resto, " ")]
+    else
+        h = remoto_ref(r, "HEAD")
+        for x in r.refs
+            if r.cabeza == "" and x.id == h and str_starts(x.nombre, "refs/heads/")
+                r.cabeza = x.nombre
+            end
+        end
+    end
+    return r
+end
+
+func tiene_cap(r: Remoto, c: String) -> Bool
+    return str_contains(r.caps, " " + c + " ") or str_contains(r.caps, " " + c + "=")
+end
+
+# ---- pedir un pack (upload-pack) ----
+
+# Pide los objetos de "quiero" (sin los que ya tenemos de "tengo") y los guarda como pack con su .idx.
+# "" si fue bien, o el error.
+func traer_pack(r: Remoto, quiero: [String], tengo: [String]) -> String
+    if quiero.length == 0
+        return ""
+    end
+    caps = "ofs-delta"
+    if tiene_cap(r, "side-band-64k")
+        caps = caps + " side-band-64k"
+    elif tiene_cap(r, "side-band")
+        caps = caps + " side-band"
+    end
+    if tiene_cap(r, "no-progress")
+        caps = caps + " no-progress"
+    end
+    caps = caps + " agent=dashgit/0.1"
+    pet = ""
+    primera = true
+    for q in quiero
+        if primera
+            pet = pet + pkt("want " + q + " " + caps + "\n")
+            primera = false
+        else
+            pet = pet + pkt("want " + q + "\n")
+        end
+    end
+    pet = pet + "0000"
+    for h in tengo
+        pet = pet + pkt("have " + h + "\n")
+    end
+    pet = pet + pkt("done\n")
+    u = url_partir(r.url)
+    cuerpo = texto_a_trozo(pet)
+    resp = http_pedir("POST", r.url + "/git-upload-pack", "application/x-git-upload-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-upload-pack-result\r\n")
+    trozo_libre(cuerpo)
+    if resp.estado != 200
+        e = resp.error
+        if e == ""
+            e = "el servidor contesta " + str_from_int(resp.estado, 10) + " al pedir los objetos"
+        end
+        respuesta_libre(resp)
+        return e
+    end
+    # NAK / ACK, y después el pack por la banda 1 (o tal cual sin side-band)
+    l = Lector()
+    l.b = resp.cuerpo.buf
+    l.n = resp.cuerpo.n
+    pack = buffer_alloc(l.n + 1)
+    pn = 0
+    banda = str_contains(caps, "side-band")
+    while true
+        if not banda and l.i + 4 <= l.n and buffer_equals(l.b, l.i, 4, "PACK")
+            # sin side-band: el resto es el pack
+            buffer_copy(pack, 0, l.b, l.i, l.n - l.i)
+            pn = l.n - l.i
+            break
+        end
+        t = pkt_siguiente(l)
+        if t == -2
+            break
+        end
+        if t > 0
+            c = buffer_get_byte(l.b, l.i)
+            linea = str_from_buffer(l.b, l.i, t)
+            if str_starts(linea, "NAK") or str_starts(linea, "ACK")
+                # nada
+            elif banda and c == 1
+                buffer_copy(pack, pn, l.b, l.i + 1, t - 1)
+                pn = pn + t - 1
+            elif banda and c == 3
+                buffer_free(pack)
+                respuesta_libre(resp)
+                return "el servidor dice: " + str_trim(linea[1:])
+            elif str_starts(linea, "ERR ")
+                buffer_free(pack)
+                respuesta_libre(resp)
+                return "el servidor dice: " + str_trim(linea[4:])
+            end
+            l.i = l.i + t
+        end
+    end
+    respuesta_libre(resp)
+    e = guardar_pack(pack, pn)
+    buffer_free(pack)
+    return e
+end
+
+# ---- guardar un pack recibido y hacer su .idx (como git index-pack) ----
+
+struct ObjPack
+    offset: Int = 0
+    fin: Int = 0          # dónde empieza el siguiente
+    id: String = ""
+    crc: Int = 0
+end
+
+func _por_id(a: ObjPack, b: ObjPack) -> Bool
+    return a.id < b.id
+end
+
+# Comprueba el pack, lo guarda en objects/pack y escribe su .idx. "" si fue bien, o el error.
+func guardar_pack(b: Pointer, n: Int) -> String
+    if n < 32 or not buffer_equals(b, 0, 4, "PACK")
+        return "lo que mandó el servidor no es un pack"
+    end
+    cuantos = buffer_get_long(b, 8)
+    suma = sha1(b, n - 20)
+    if suma != a_hex(b, n - 20, 20)
+        return "el pack llegó roto (su SHA-1 no cuadra)"
+    end
+    d = git_dir + "/objects/pack"
+    crear_cajones(d)
+    ruta = d + "/pack-" + suma + ".pack"
+    if file_save(ruta, b, n) != n
+        return "no se pudo guardar " + ruta
+    end
+    # primera pasada: dónde empieza y acaba cada objeto, y su crc32
+    var objs: [ObjPack] = []
+    off = 12
+    k = 0
+    while k < cuantos
+        o = ObjPack()
+        o.offset = off
+        c = buffer_get_byte(b, off)
+        tipo = (c >> 4) & 7
+        tam = c & 15
+        sh = 4
+        i = off + 1
+        while (c & 0x80) != 0
+            c = buffer_get_byte(b, i)
+            tam = tam | ((c & 0x7F) << sh)
+            sh = sh + 7
+            i = i + 1
+        end
+        if tipo == 6
+            c = buffer_get_byte(b, i)
+            i = i + 1
+            while (c & 0x80) != 0
+                c = buffer_get_byte(b, i)
+                i = i + 1
+            end
+        elif tipo == 7
+            i = i + 20
+        end
+        tmp = buffer_alloc(tam + 1)
+        r = inflate_auto(b + i, n - 20 - i, tmp, tam + 1)
+        buffer_free(tmp)
+        if r != tam
+            return "el objeto " + str_from_int(k, 10) + " del pack está roto"
+        end
+        o.fin = i + inflate_used()
+        o.crc = crc32(b + off, o.fin - off, 0)
+        objs.push(o)
+        off = o.fin
+        k = k + 1
+    end
+    # segunda: el id de cada objeto (con sus deltas resueltos, leyendo del .pack ya guardado)
+    p = Pack()
+    p.ruta = ruta
+    p.tam = n
+    indexando.clear()
+    indexando_activo = true
+    pendientes = cuantos
+    vueltas = 0
+    while pendientes > 0 and vueltas < 50
+        pendientes = 0
+        for o in objs
+            if o.id == ""
+                x = pack_leer_en(p, o.offset, 0)
+                if x == nil
+                    pendientes = pendientes + 1
+                else
+                    t = con_cabecera(x.tipo, x.datos, x.n)
+                    o.id = sha1(t.buf, t.n)
+                    trozo_libre(t)
+                    objeto_libre(x)
+                    indexando[o.id] = o.offset + 1
+                end
+            end
+        end
+        vueltas = vueltas + 1
+    end
+    indexando_activo = false
+    indexando.clear()
+    if p.fh != 0
+        file_close(p.fh)
+        p.fh = 0
+    end
+    if pendientes > 0
+        file_delete(ruta)
+        return "faltan las bases de " + str_from_int(pendientes, 10) + " objetos del pack"
+    end
+    # el .idx versión 2
+    objs.sort(_por_id)
+    tam = 8 + 1024 + cuantos * 28 + 40
+    ix = buffer_alloc(tam)
+    buffer_fill(ix, 0, tam, 0)
+    buffer_set_byte(ix, 0, 0xFF)
+    str_to_buffer("tOc", ix, 1)
+    buffer_set_long(ix, 4, 2)
+    j = 0
+    cuenta = 0
+    while j < 256
+        while cuenta < cuantos and str_to_int(objs[cuenta].id[:2], 16) <= j
+            cuenta = cuenta + 1
+        end
+        buffer_set_long(ix, 8 + j * 4, cuenta)
+        j = j + 1
+    end
+    base = 1032
+    j = 0
+    while j < cuantos
+        de_hex(objs[j].id, ix, base + j * 20)
+        buffer_set_long(ix, base + cuantos * 20 + j * 4, objs[j].crc)
+        buffer_set_long(ix, base + cuantos * 24 + j * 4, objs[j].offset)
+        j = j + 1
+    end
+    de_hex(suma, ix, base + cuantos * 28)
+    h = sha1(ix, tam - 20)
+    de_hex(h, ix, tam - 20)
+    ok = file_save(d + "/pack-" + suma + ".idx", ix, tam) == tam
+    buffer_free(ix)
+    if not ok
+        return "no se pudo guardar el .idx"
+    end
+    # que los siguientes objeto_leer vean el pack nuevo
+    packs_leidos = false
+    packs_lista.clear()
+    return ""
+end
+
+# ---- de quién viene qué ----
+
+# Si el commit "antiguo" está en la historia de "nuevo" (hasta 5000 commits atrás)
+func es_antepasado(antiguo: String, nuevo: String) -> Bool
+    if antiguo == "" or antiguo == nuevo
+        return true
+    end
+    var cola: [String] = [nuevo]
+    var vistos: {String: Int} = {}
+    mirados = 0
+    while cola.length > 0 and mirados < 5000
+        id = cola.pop()
+        if vistos.get(id, 0) == 0
+            vistos[id] = 1
+            mirados = mirados + 1
+            if id == antiguo
+                return true
+            end
+            o = objeto_leer(id)
+            if o != nil
+                for pp in commit_padres(o)
+                    cola.push(pp)
+                end
+                objeto_libre(o)
+            end
+        end
+    end
+    return false
+end
+
+func remoto_url(nombre: String) -> String
+    return config_leer("remote." + nombre + ".url")
+end
+
+# ---- clone ----
+
+func orden_clone(args: [String])
+    if args.length < 1
+        aviso("uso: clone url [cajón]")
+        return
+    end
+    url = args[0]
+    while str_ends(url, "/")
+        url = url[:url.length - 1]
+    end
+    destino = ""
+    if args.length > 1
+        destino = args[1]
+    else
+        destino = ruta_nombre(url)
+        if str_ends(destino, ".git")
+            destino = destino[:destino.length - 4]
+        end
+    end
+    if not str_contains(destino, ":")
+        destino = ruta_unir(dir_current(), destino)
+    end
+    if file_exists(ruta_unir(destino, ".git"))
+        aviso("ya hay un repositorio en " + destino)
+        return
+    end
+    Print "Clonando en " + destino + "..."
+    r = descubrir(url, "git-upload-pack")
+    if r.error != ""
+        aviso(r.error)
+        return
+    end
+    crear_cajones(destino)
+    if repo_crear(destino) == ""
+        aviso("no se pudo crear el repositorio en " + destino)
+        return
+    end
+    config_poner("remote.origin.url", url, git_dir + "/config")
+    config_poner("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*", git_dir + "/config")
+    var quiero: [String] = []
+    for x in r.refs
+        if str_starts(x.nombre, "refs/heads/") or str_starts(x.nombre, "refs/tags/")
+            esta = false
+            for q in quiero
+                if q == x.id
+                    esta = true
+                end
+            end
+            if not esta
+                quiero.push(x.id)
+            end
+        end
+    end
+    if quiero.length == 0
+        Print "El repositorio está vacío."
+        return
+    end
+    var nada: [String] = []
+    e = traer_pack(r, quiero, nada)
+    if e != ""
+        aviso(e)
+        return
+    end
+    for x in r.refs
+        if str_starts(x.nombre, "refs/heads/")
+            ref_escribir("refs/remotes/origin/" + x.nombre[11:], x.id)
+        elif str_starts(x.nombre, "refs/tags/")
+            ref_escribir(x.nombre, x.id)
+        end
+    end
+    cabeza = r.cabeza
+    if cabeza == ""
+        cabeza = "refs/heads/main"
+    end
+    id = remoto_ref(r, cabeza)
+    if id == ""
+        Print "No se sabe qué rama sacar: el repositorio queda sin ficheros (dashgit checkout rama)."
+        return
+    end
+    rama = cabeza[11:]
+    file_write_text(git_dir + "/refs/remotes/origin/HEAD", "ref: refs/remotes/origin/" + rama + "\n")
+    ref_escribir(cabeza, id)
+    file_write_text(git_dir + "/HEAD", "ref: " + cabeza + "\n")
+    config_poner("branch." + rama + ".remote", "origin", git_dir + "/config")
+    config_poner("branch." + rama + ".merge", cabeza, git_dir + "/config")
+    var vacio: [EntradaIndice] = []
+    var despues: [EntradaIndice] = ficheros_de_commit(id)
+    if despues == nil
+        aviso("faltan objetos del commit " + id)
+        return
+    end
+    if not cambiar_arbol_con(vacio, despues, false)
+        return
+    end
+    Print "Hecho: rama " + rama + ", " + str_from_int(despues.length, 10) + " ficheros."
+end
+
+# ---- fetch ----
+
+# Trae lo nuevo de un remoto y actualiza refs/remotes/<nombre>/*; el Remoto, o nil si falló
+func traer(nombre: String) -> Remoto
+    url = remoto_url(nombre)
+    if url == ""
+        aviso("no hay un remoto " + nombre + " (dashgit config remote." + nombre + ".url URL)")
+        return nil
+    end
+    r = descubrir(url, "git-upload-pack")
+    if r.error != ""
+        aviso(r.error)
+        return nil
+    end
+    var quiero: [String] = []
+    for x in r.refs
+        if (str_starts(x.nombre, "refs/heads/") or str_starts(x.nombre, "refs/tags/")) and not objeto_existe(x.id)
+            esta = false
+            for q in quiero
+                if q == x.id
+                    esta = true
+                end
+            end
+            if not esta
+                quiero.push(x.id)
+            end
+        end
+    end
+    var tengo: [String] = []
+    for b in ramas()
+        tengo.push(ref_leer("refs/heads/" + b))
+    end
+    for x in r.refs
+        if str_starts(x.nombre, "refs/heads/")
+            v = ref_leer("refs/remotes/" + nombre + "/" + x.nombre[11:])
+            if v != "" and objeto_existe(v)
+                tengo.push(v)
+            end
+        end
+    end
+    e = traer_pack(r, quiero, tengo)
+    if e != ""
+        aviso(e)
+        return nil
+    end
+    for x in r.refs
+        if str_starts(x.nombre, "refs/heads/")
+            ref = "refs/remotes/" + nombre + "/" + x.nombre[11:]
+            antes = ref_leer(ref)
+            if antes != x.id
+                ref_escribir(ref, x.id)
+                if antes == ""
+                    Print " * [nueva rama]  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:]
+                else
+                    Print "   " + antes[:7] + ".." + x.id[:7] + "  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:]
+                end
+            end
+        elif str_starts(x.nombre, "refs/tags/") and ref_leer(x.nombre) == ""
+            ref_escribir(x.nombre, x.id)
+            Print " * [nueva etiqueta]  " + x.nombre[10:]
+        end
+    end
+    return r
+end
+
+func orden_fetch(args: [String])
+    nombre = "origin"
+    if args.length > 0
+        nombre = args[0]
+    end
+    traer(nombre)
+end
+
+# ---- pull (solo avance rápido) ----
+
+func orden_pull(args: [String])
+    nombre = "origin"
+    if args.length > 0
+        nombre = args[0]
+    end
+    rama = head_rama()
+    if rama == ""
+        aviso("HEAD no está en una rama")
+        return
+    end
+    if traer(nombre) == nil
+        return
+    end
+    corta = rama[11:]
+    suyo = ref_leer("refs/remotes/" + nombre + "/" + corta)
+    if suyo == ""
+        aviso("el remoto " + nombre + " no tiene la rama " + corta)
+        return
+    end
+    mio = head_id()
+    if mio == suyo or es_antepasado(suyo, mio)
+        Print "Ya está al día."
+        return
+    end
+    if not es_antepasado(mio, suyo)
+        aviso("tu rama y la del remoto tienen commits distintos; dashgit aún no sabe fusionarlas")
+        return
+    end
+    var antes: [EntradaIndice] = ficheros_de_commit(mio)
+    var despues: [EntradaIndice] = ficheros_de_commit(suyo)
+    if antes == nil or despues == nil
+        aviso("falta algún objeto")
+        return
+    end
+    if not cambiar_arbol(antes, despues)
+        return
+    end
+    ref_escribir(rama, suyo)
+    Print "Avance rápido: " + mio[:7] + ".." + suyo[:7]
+end
+
+# ---- push ----
+
+# Los ids de un árbol y todo lo que cuelga de él, en vistos
+func _marcar_arbol(id: String, vistos: {String: Int})
+    if vistos.get(id, 0) != 0
+        return
+    end
+    vistos[id] = 1
+    o = objeto_leer(id)
+    if o == nil
+        return
+    end
+    var es: [Entrada] = arbol_leer(o)
+    objeto_libre(o)
+    for e in es
+        if e.modo == "40000"
+            _marcar_arbol(e.id, vistos)
+        elif e.modo != "160000"
+            vistos[e.id] = 1
+        end
+    end
+end
+
+# Añade a lista los ids de un árbol que no están en vistos (y los marca)
+func _nuevos_del_arbol(id: String, vistos: {String: Int}, lista: [String])
+    if vistos.get(id, 0) != 0
+        return
+    end
+    vistos[id] = 1
+    lista.push(id)
+    o = objeto_leer(id)
+    if o == nil
+        return
+    end
+    var es: [Entrada] = arbol_leer(o)
+    objeto_libre(o)
+    for e in es
+        if e.modo == "40000"
+            _nuevos_del_arbol(e.id, vistos, lista)
+        elif e.modo != "160000" and vistos.get(e.id, 0) == 0
+            vistos[e.id] = 1
+            lista.push(e.id)
+        end
+    end
+end
+
+func num_tipo(t: String) -> Int
+    if t == "commit"
+        return 1
+    end
+    if t == "tree"
+        return 2
+    end
+    if t == "blob"
+        return 3
+    end
+    return 4
+end
+
+# Un pack con esos objetos (enteros, sin deltas); nil si falta alguno
+func hacer_pack(ids: [String]) -> Trozo
+    var partes: [Trozo] = []
+    total = 12
+    for id in ids
+        o = objeto_leer(id)
+        if o == nil
+            for t in partes
+                trozo_libre(t)
+            end
+            return nil
+        end
+        z = zlib_comprimir(o.datos, o.n)
+        cab = buffer_alloc(16)
+        tam = o.n
+        c = (num_tipo(o.tipo) << 4) | (tam & 15)
+        tam = (tam >> 4) & 0x0FFFFFFF
+        k = 0
+        while tam > 0
+            buffer_set_byte(cab, k, c | 0x80)
+            k = k + 1
+            c = tam & 0x7F
+            tam = tam >> 7
+        end
+        buffer_set_byte(cab, k, c)
+        k = k + 1
+        t = Trozo()
+        t.n = k + z.n
+        t.buf = buffer_alloc(t.n)
+        buffer_copy(t.buf, 0, cab, 0, k)
+        buffer_copy(t.buf, k, z.buf, 0, z.n)
+        buffer_free(cab)
+        trozo_libre(z)
+        objeto_libre(o)
+        partes.push(t)
+        total = total + t.n
+    end
+    r = Trozo()
+    r.n = total + 20
+    r.buf = buffer_alloc(r.n)
+    str_to_buffer("PACK", r.buf, 0)
+    buffer_set_long(r.buf, 4, 2)
+    buffer_set_long(r.buf, 8, ids.length)
+    o = 12
+    for t in partes
+        buffer_copy(r.buf, o, t.buf, 0, t.n)
+        o = o + t.n
+        trozo_libre(t)
+    end
+    h = sha1(r.buf, o)
+    de_hex(h, r.buf, o)
+    return r
+end
+
+func orden_push(args: [String])
+    nombre = "origin"
+    rama = head_rama()
+    if args.length > 0
+        nombre = args[0]
+    end
+    if args.length > 1
+        rama = "refs/heads/" + args[1]
+    end
+    if rama == ""
+        aviso("HEAD no está en una rama")
+        return
+    end
+    corta = rama[11:]
+    mio = ref_leer(rama)
+    if mio == ""
+        aviso("no hay commits en la rama " + corta)
+        return
+    end
+    url = remoto_url(nombre)
+    if url == ""
+        aviso("no hay un remoto " + nombre)
+        return
+    end
+    r = descubrir(url, "git-receive-pack")
+    if r.error != ""
+        aviso(r.error)
+        return
+    end
+    suyo = remoto_ref(r, rama)
+    if suyo == mio
+        Print "Ya está al día."
+        return
+    end
+    if suyo != "" and not (objeto_existe(suyo) and es_antepasado(suyo, mio))
+        aviso("el remoto tiene commits que tú no tienes; haz dashgit pull antes")
+        return
+    end
+    # los commits nuevos, de mio hacia atrás hasta suyo
+    var vistos: {String: Int} = {}
+    if suyo != ""
+        _marcar_arbol(commit_arbol(suyo), vistos)
+        vistos[suyo] = 1
+    end
+    var commits: [String] = []
+    var cola: [String] = [mio]
+    while cola.length > 0
+        id = cola.pop()
+        if vistos.get(id, 0) == 0 and not (suyo != "" and es_antepasado(id, suyo))
+            vistos[id] = 1
+            commits.push(id)
+            o = objeto_leer(id)
+            if o != nil
+                for pp in commit_padres(o)
+                    cola.push(pp)
+                end
+                objeto_libre(o)
+            end
+        end
+    end
+    var ids: [String] = []
+    for c in commits
+        ids.push(c)
+        _nuevos_del_arbol(commit_arbol(c), vistos, ids)
+    end
+    pack = hacer_pack(ids)
+    if pack == nil
+        aviso("falta algún objeto para el pack")
+        return
+    end
+    viejo = suyo
+    if viejo == ""
+        viejo = CERO
+    end
+    # la línea lleva un byte 0 antes de las capacidades: se arma en el búfer
+    cab = viejo + " " + mio + " " + rama
+    caps = "report-status agent=dashgit/0.1\n"
+    largo = cab.length + 1 + caps.length + 4
+    hexl = str_from_int(largo, 16)
+    while hexl.length < 4
+        hexl = "0" + hexl
+    end
+    cuerpo = Trozo()
+    cuerpo.n = largo + 4 + pack.n
+    cuerpo.buf = buffer_alloc(cuerpo.n)
+    str_to_buffer(hexl + cab, cuerpo.buf, 0)
+    buffer_set_byte(cuerpo.buf, 4 + cab.length, 0)
+    str_to_buffer(caps, cuerpo.buf, 5 + cab.length)
+    str_to_buffer("0000", cuerpo.buf, largo)
+    buffer_copy(cuerpo.buf, largo + 4, pack.buf, 0, pack.n)
+    trozo_libre(pack)
+    u = url_partir(url)
+    resp = http_pedir("POST", url + "/git-receive-pack", "application/x-git-receive-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-receive-pack-result\r\n")
+    trozo_libre(cuerpo)
+    if resp.estado != 200
+        e = resp.error
+        if e == ""
+            e = "el servidor contesta " + str_from_int(resp.estado, 10)
+        end
+        aviso(e)
+        respuesta_libre(resp)
+        return
+    end
+    l = Lector()
+    l.b = resp.cuerpo.buf
+    l.n = resp.cuerpo.n
+    bien = false
+    while true
+        t = pkt_siguiente(l)
+        if t == -2
+            break
+        end
+        if t > 0
+            s = str_trim(str_from_buffer(l.b, l.i, t))
+            l.i = l.i + t
+            if str_starts(s, "unpack ") and s != "unpack ok"
+                aviso("el servidor no pudo abrir el pack: " + s[7:])
+            elif str_starts(s, "ok ")
+                bien = true
+            elif str_starts(s, "ng ")
+                aviso("el servidor rechaza " + s[3:])
+            end
+        end
+    end
+    respuesta_libre(resp)
+    if bien
+        ref_escribir("refs/remotes/" + nombre + "/" + corta, mio)
+        antes = "[nueva rama]"
+        if suyo != ""
+            antes = suyo[:7] + ".." + mio[:7]
+        end
+        Print "A " + url
+        Print "   " + antes + "  " + corta + " -> " + corta
+    end
+end

@@ -149,14 +149,45 @@ end
 
 # ---- configuración (.git/config, formato ini) ----
 
-# El valor de "seccion.clave" ("user.name"); "" si no está
-func config_leer(clave: String) -> String
+# "user.name" a ("user", "name"); "remote.origin.url" a ('remote "origin"', "url"). La sección, en minúsculas
+# salvo la subsección.
+func _config_partes(clave: String) -> [String]
+    var r: [String] = []
     p = str_find(clave, ".")
+    q = ultima_pos(clave, ".")
     if p < 0
+        return r
+    end
+    if p == q
+        r.push(str_lower(clave[:p]))
+    else
+        r.push(str_lower(clave[:p]) + " \"" + clave[p + 1:q] + "\"")
+    end
+    r.push(str_lower(clave[q + 1:]))
+    return r
+end
+
+# La sección de una línea "[remote "origin"]", con el nombre en minúsculas; "" si no es una cabecera
+func _config_seccion(l: String) -> String
+    if not str_starts(l, "[")
         return ""
     end
-    seccion = str_lower(clave[:p])
-    nombre = str_lower(clave[p + 1:])
+    t = str_trim(str_replace(str_replace(l, "[", ""), "]", ""))
+    esp = str_find(t, " ")
+    if esp < 0
+        return str_lower(t)
+    end
+    return str_lower(t[:esp]) + " " + str_trim(t[esp + 1:])
+end
+
+# El valor de "seccion.clave" o "seccion.sub.clave"; "" si no está
+func config_leer(clave: String) -> String
+    var pp: [String] = _config_partes(clave)
+    if pp.length < 2
+        return ""
+    end
+    seccion = pp[0]
+    nombre = pp[1]
     for fichero in [git_dir + "/config", "ENV:dashgit/config", "ENVARC:dashgit/config"]
         if file_exists(fichero)
             t = file_read_text(fichero)
@@ -164,7 +195,7 @@ func config_leer(clave: String) -> String
             for linea in str_split(t, "\n")
                 l = str_trim(linea)
                 if str_starts(l, "[")
-                    actual = str_lower(str_trim(str_replace(str_replace(l, "[", ""), "]", "")))
+                    actual = _config_seccion(l)
                 elif actual == seccion
                     ig = str_find(l, "=")
                     if ig > 0 and str_lower(str_trim(l[:ig])) == nombre
@@ -177,14 +208,14 @@ func config_leer(clave: String) -> String
     return ""
 end
 
-# Pone "seccion.clave" en .git/config (o en el fichero dado)
+# Pone una clave en un fichero de configuración
 func config_poner(clave: String, valor: String, fichero: String) -> Bool
-    p = str_find(clave, ".")
-    if p < 0
+    var pp: [String] = _config_partes(clave)
+    if pp.length < 2
         return false
     end
-    seccion = str_lower(clave[:p])
-    nombre = str_lower(clave[p + 1:])
+    seccion = pp[0]
+    nombre = pp[1]
     t = ""
     if file_exists(fichero)
         t = file_read_text(fichero)
@@ -199,16 +230,15 @@ func config_poner(clave: String, valor: String, fichero: String) -> Bool
     while i < lineas.length
         l = str_trim(lineas[i])
         if str_starts(l, "[")
-            actual = str_lower(str_trim(str_replace(str_replace(l, "[", ""), "]", "")))
+            actual = _config_seccion(l)
         elif actual == seccion
-            fin_seccion = i
             ig = str_find(l, "=")
             if ig > 0 and str_lower(str_trim(l[:ig])) == nombre
                 lineas[i] = "\t" + nombre + " = " + valor
                 return file_write_text(fichero, str_join(lineas) + "\n")
             end
         end
-        if actual == seccion and fin_seccion < 0
+        if actual == seccion
             fin_seccion = i
         end
         i = i + 1

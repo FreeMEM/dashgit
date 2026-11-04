@@ -68,7 +68,7 @@ func ruta_objeto(id: String) -> String
 end
 
 # La cabecera y los datos de un objeto, juntos en un búfer ("blob 5\0hola\n")
-func _con_cabecera(tipo: String, datos: Pointer, n: Int) -> Trozo
+func con_cabecera(tipo: String, datos: Pointer, n: Int) -> Trozo
     cab = tipo + " " + str_from_int(n, 10)
     h = cab.length + 1
     t = Trozo()
@@ -84,7 +84,7 @@ end
 
 # El id de unos datos como objeto de ese tipo; con escribir, lo guarda (si no estaba). "" si no pudo guardarlo.
 func objeto_escribir(tipo: String, datos: Pointer, n: Int, escribir: Bool) -> String
-    t = _con_cabecera(tipo, datos, n)
+    t = con_cabecera(tipo, datos, n)
     id = hash_hex(t.buf, t.n)
     if escribir
         ruta = ruta_objeto(id)
@@ -170,11 +170,14 @@ struct Pack
     fh: Int = 0            # el .pack abierto (0 si no)
 end
 
-var _packs: [Pack] = []
-var _packs_leidos: Bool = false
+var packs_lista: [Pack] = []
+# Mientras se indexa un pack recibido: id -> offset + 1 de sus objetos (para los deltas "ref")
+var indexando_activo: Bool = false
+var indexando: {String: Int} = {}
+var packs_leidos: Bool = false
 
-func _cargar_packs()
-    _packs_leidos = true
+func cargar_packs()
+    packs_leidos = true
     d = git_dir + "/objects/pack"
     n = dir_read(d)
     var nombres: [String] = []
@@ -194,7 +197,7 @@ func _cargar_packs()
             p.ruta = d + "/" + nombre[:nombre.length - 4] + ".pack"
             p.tam = file_size(p.ruta)
             if p.tam > 32
-                _packs.push(p)
+                packs_lista.push(p)
             else
                 trozo_libre(t)
             end
@@ -261,15 +264,15 @@ end
 
 # En qué pack está un objeto, y dónde; nil si en ninguno
 func pack_buscar(id: String) -> Hallado
-    if not _packs_leidos
-        _cargar_packs()
+    if not packs_leidos
+        cargar_packs()
     end
-    if _packs.length == 0
+    if packs_lista.length == 0
         return nil
     end
     bin = buffer_alloc(20)
     de_hex(id, bin, 0)
-    for p in _packs
+    for p in packs_lista
         i = _pack_posicion(p, bin)
         if i >= 0
             buffer_free(bin)
@@ -288,13 +291,13 @@ func pack_leer(id: String) -> Objeto
     if h == nil or h.offset < 0
         return nil
     end
-    return _pack_leer_en(h.pack, h.offset, 0)
+    return pack_leer_en(h.pack, h.offset, 0)
 end
 
 const _TIPOS = ["", "commit", "tree", "blob", "tag"]
 
 # El objeto que empieza en offset de un pack (con sus deltas resueltos)
-func _pack_leer_en(p: Pack, off: Int, prof: Int) -> Objeto
+func pack_leer_en(p: Pack, off: Int, prof: Int) -> Objeto
     if prof > 64
         return nil
     end
@@ -364,7 +367,9 @@ func _pack_leer_en(p: Pack, off: Int, prof: Int) -> Objeto
     end
     var base: Objeto = nil
     if tipo == 6
-        base = _pack_leer_en(p, base_off, prof + 1)
+        base = pack_leer_en(p, base_off, prof + 1)
+    elif indexando_activo and indexando.get(base_id, 0) > 0
+        base = pack_leer_en(p, indexando.get(base_id, 0) - 1, prof + 1)
     else
         base = objeto_leer(base_id)
     end

@@ -1,0 +1,306 @@
+# dashgit - un cliente HTTP/1.1 sencillo (http y https), para el protocolo de git
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "util.dash"
+
+struct Url
+    https: Bool = true
+    host: String = ""
+    puerto: Int = 443
+    ruta: String = "/"     # sin "/" al final
+end
+
+# "https://github.com/FreeMEM/forja.git" a sus partes; nil si no es http ni https
+func url_partir(u: String) -> Url
+    r = Url()
+    resto = ""
+    if str_starts(str_lower(u), "https://")
+        resto = u[8:]
+    elif str_starts(str_lower(u), "http://")
+        r.https = false
+        r.puerto = 80
+        resto = u[7:]
+    else
+        return nil
+    end
+    barra = str_find(resto, "/")
+    hp = resto
+    r.ruta = ""
+    if barra >= 0
+        hp = resto[:barra]
+        r.ruta = resto[barra:]
+    end
+    # usuario@ delante del host: se ignora (las credenciales van aparte)
+    arroba = str_find(hp, "@")
+    if arroba >= 0
+        hp = hp[arroba + 1:]
+    end
+    dp = str_find(hp, ":")
+    if dp >= 0
+        r.host = hp[:dp]
+        r.puerto = Int(hp[dp + 1:])
+    else
+        r.host = hp
+    end
+    while str_ends(r.ruta, "/")
+        r.ruta = r.ruta[:r.ruta.length - 1]
+    end
+    return r
+end
+
+const _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+func base64(s: String) -> String
+    r = ""
+    n = s.length
+    i = 0
+    while i < n
+        a = str_code(s, i)
+        b = 0
+        c = 0
+        if i + 1 < n
+            b = str_code(s, i + 1)
+        end
+        if i + 2 < n
+            c = str_code(s, i + 2)
+        end
+        v = (a << 16) | (b << 8) | c
+        r = r + _B64[(v >> 18) & 63] + _B64[(v >> 12) & 63]
+        if i + 1 < n
+            r = r + _B64[(v >> 6) & 63]
+        else
+            r = r + "="
+        end
+        if i + 2 < n
+            r = r + _B64[v & 63]
+        else
+            r = r + "="
+        end
+        i = i + 3
+    end
+    return r
+end
+
+struct Respuesta
+    estado: Int = 0          # 200, 401, 404...; 0 si no hubo respuesta
+    error: String = ""       # por qué falló la conexión
+    cabeceras: String = ""   # en minúsculas
+    cuerpo: Trozo = nil
+end
+
+func respuesta_libre(r: Respuesta)
+    if r != nil
+        trozo_libre(r.cuerpo)
+    end
+end
+
+# El valor de una cabecera (nombre en minúsculas); "" si no está
+func cabecera(r: Respuesta, nombre: String) -> String
+    for l in str_split(r.cabeceras, "\n")
+        if str_starts(l, nombre + ":")
+            return str_trim(l[nombre.length + 1:])
+        end
+    end
+    return ""
+end
+
+var http_espera: Int = 60000   # ms sin recibir nada antes de dar la conexión por muerta
+var http_traza: Bool = false
+
+# Una petición; cuerpo puede ser nil. extra: líneas de cabecera ya acabadas en "\r\n".
+func http_pedir(metodo: String, url: String, tipo: String, cuerpo: Trozo, extra: String) -> Respuesta
+    r = Respuesta()
+    u = url_partir(url)
+    if u == nil
+        r.error = "no es una dirección http ni https: " + url
+        return r
+    end
+    sock = net_connect(u.host, u.puerto, 30000)
+    if sock < 0
+        r.error = "no se puede conectar con " + u.host + ": " + net_error()
+        return r
+    end
+    tls = 0
+    if u.https
+        tls = tls_connect(sock, u.host)
+        if tls < 0
+            r.error = "TLS con " + u.host + ": " + net_error()
+            net_close(sock)
+            return r
+        end
+    end
+    ruta = u.ruta
+    if ruta == ""
+        ruta = "/"
+    end
+    cab = metodo + " " + ruta + " HTTP/1.1\r\nHost: " + u.host
+    if (u.https and u.puerto != 443) or (not u.https and u.puerto != 80)
+        cab = cab + ":" + str_from_int(u.puerto, 10)
+    end
+    # GitHub solo habla el protocolo "smart" con agentes que empiezan por "git/"
+    cab = cab + "\r\nUser-Agent: git/2.0 (dashgit 0.1)\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n" + extra
+    if cuerpo != nil
+        cab = cab + "Content-Type: " + tipo + "\r\nContent-Length: " + str_from_int(cuerpo.n, 10) + "\r\n"
+    end
+    cab = cab + "\r\n"
+    ok = true
+    if u.https
+        ok = tls_send(tls, cab) >= 0
+        if ok and cuerpo != nil and cuerpo.n > 0
+            ok = _enviar_todo(tls, true, cuerpo.buf, cuerpo.n)
+        end
+    else
+        ok = net_send(sock, cab) >= 0
+        if ok and cuerpo != nil and cuerpo.n > 0
+            ok = _enviar_todo(sock, false, cuerpo.buf, cuerpo.n)
+        end
+    end
+    if not ok
+        r.error = "no se pudo enviar la petición: " + net_error()
+        _cerrar(sock, tls)
+        return r
+    end
+    # todo lo que llegue, hasta que cierre (Connection: close)
+    cap = 16384
+    b = buffer_alloc(cap)
+    n = 0
+    while true
+        if n + 8192 > cap
+            cap = cap * 2
+            nb = buffer_alloc(cap)
+            if nb == nil
+                r.error = "no hay memoria para la respuesta (" + str_from_int(n, 10) + " bytes)"
+                buffer_free(b)
+                _cerrar(sock, tls)
+                return r
+            end
+            buffer_copy(nb, 0, b, 0, n)
+            buffer_free(b)
+            b = nb
+        end
+        k = 0
+        if u.https
+            k = tls_recv_buffer(tls, b + n, 8192, http_espera)
+        else
+            k = net_recv_buffer(sock, b + n, 8192, http_espera)
+        end
+        if k < 0
+            break
+        end
+        if k == 0
+            r.error = "el servidor dejó de contestar"
+            buffer_free(b)
+            _cerrar(sock, tls)
+            return r
+        end
+        n = n + k
+    end
+    _cerrar(sock, tls)
+    # cabeceras
+    fin = _buscar_crlfcrlf(b, n)
+    if fin < 0
+        r.error = "respuesta HTTP incompleta"
+        buffer_free(b)
+        return r
+    end
+    texto = str_replace(str_from_buffer(b, 0, fin), "\r", "")
+    primera = texto
+    nl = str_find(texto, "\n")
+    if nl >= 0
+        primera = texto[:nl]
+        r.cabeceras = str_lower(texto[nl + 1:])
+    end
+    p = str_split(primera, " ")
+    if p.length >= 2
+        r.estado = Int(p[1])
+    end
+    if http_traza
+        Print "HTTP " + metodo + " " + url + " -> " + primera
+    end
+    ini = fin + 4
+    r.cuerpo = Trozo()
+    if str_contains(cabecera(r, "transfer-encoding"), "chunked")
+        r.cuerpo.buf = buffer_alloc(n - ini + 1)
+        r.cuerpo.n = _deshacer_chunked(b, ini, n, r.cuerpo.buf)
+    else
+        r.cuerpo.n = n - ini
+        r.cuerpo.buf = buffer_alloc(r.cuerpo.n + 1)
+        if r.cuerpo.n > 0
+            buffer_copy(r.cuerpo.buf, 0, b, ini, r.cuerpo.n)
+        end
+    end
+    buffer_free(b)
+    return r
+end
+
+func _enviar_todo(con: Int, tls: Bool, b: Pointer, n: Int) -> Bool
+    hecho = 0
+    while hecho < n
+        trozo = n - hecho
+        if trozo > 16384
+            trozo = 16384
+        end
+        k = 0
+        if tls
+            k = tls_send_buffer(con, b + hecho, trozo)
+        else
+            k = net_send_buffer(con, b + hecho, trozo)
+        end
+        if k <= 0
+            return false
+        end
+        hecho = hecho + k
+    end
+    return true
+end
+
+func _cerrar(sock: Int, tls: Int)
+    if tls > 0
+        tls_close(tls)
+    end
+    net_close(sock)
+end
+
+func _buscar_crlfcrlf(b: Pointer, n: Int) -> Int
+    i = 0
+    while i + 3 < n
+        i = buffer_find_byte(b, i, n - 3, 13)
+        if i < 0
+            return -1
+        end
+        if buffer_get_byte(b, i + 1) == 10 and buffer_get_byte(b, i + 2) == 13 and buffer_get_byte(b, i + 3) == 10
+            return i
+        end
+        i = i + 1
+    end
+    return -1
+end
+
+# Junta los trozos de "Transfer-Encoding: chunked" de b[ini..fin) en dest; cuántos bytes
+func _deshacer_chunked(b: Pointer, ini: Int, fin: Int, dest: Pointer) -> Int
+    i = ini
+    o = 0
+    while i < fin
+        nl = buffer_find_byte(b, i, fin, 10)
+        if nl < 0
+            return o
+        end
+        linea = str_trim(str_from_buffer(b, i, nl - i))
+        pc = str_find(linea, ";")
+        if pc >= 0
+            linea = linea[:pc]
+        end
+        t = str_to_int(linea, 16)
+        i = nl + 1
+        if t <= 0
+            return o
+        end
+        if i + t > fin
+            t = fin - i
+        end
+        buffer_copy(dest, o, b, i, t)
+        o = o + t
+        i = i + t + 2
+    end
+    return o
+end

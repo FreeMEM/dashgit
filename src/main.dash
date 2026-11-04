@@ -7,7 +7,7 @@
 @version "dashgit 0.1"
 @stack 100000
 
-import "diff.dash"
+import "red.dash"
 
 const VERSION = "0.1"
 
@@ -31,6 +31,10 @@ func uso()
     Print "  dashgit branch [-d] [rama [desde]]"
     Print "  dashgit checkout (rama | -b rama | -- fichero...)"
     Print "  dashgit diff [--cached] [fichero...]"
+    Print "  dashgit clone url [cajón]"
+    Print "  dashgit fetch [remoto]"
+    Print "  dashgit pull [remoto]"
+    Print "  dashgit push [remoto [rama]]"
 end
 
 func necesita_repo() -> Bool
@@ -217,6 +221,18 @@ Main
                     orden_diff(args)
                 else
                     orden_checkout(args)
+                end
+            end
+        elif orden == "clone"
+            orden_clone(args)
+        elif orden == "fetch" or orden == "pull" or orden == "push"
+            if necesita_repo()
+                if orden == "fetch"
+                    orden_fetch(args)
+                elif orden == "pull"
+                    orden_pull(args)
+                else
+                    orden_push(args)
                 end
             end
         elif orden == "version" or orden == "--version"

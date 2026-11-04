@@ -624,16 +624,23 @@ end
 # Pasa el árbol de trabajo y el índice de los ficheros de "antes" a los de "despues"; false si hay cambios que se
 # perderían (no toca nada)
 func cambiar_arbol(antes: [EntradaIndice], despues: [EntradaIndice]) -> Bool
-    e = estado(true)
-    if e == nil
-        return false
-    end
+    return cambiar_arbol_con(antes, despues, true)
+end
+
+# mirar: comprobar antes que no se pierden cambios (no hace falta en un clon recién hecho)
+func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: Bool) -> Bool
     var tocados: {String: Int} = {}
-    for l in e.preparados
-        tocados[l[3:]] = 1
-    end
-    for l in e.sin_preparar
-        tocados[l[3:]] = 1
+    if mirar
+        e = estado(true)
+        if e == nil
+            return false
+        end
+        for l in e.preparados
+            tocados[l[3:]] = 1
+        end
+        for l in e.sin_preparar
+            tocados[l[3:]] = 1
+        end
     end
     var en_antes: {String: Int} = {}
     i = 0
