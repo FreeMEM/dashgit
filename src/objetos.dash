@@ -117,14 +117,17 @@ func objeto_escribir_texto(tipo: String, s: String) -> String
 end
 
 func objeto_existe(id: String) -> Bool
-    return file_exists(ruta_objeto(id))
+    if file_exists(ruta_objeto(id))
+        return true
+    end
+    return pack_buscar(id) != nil
 end
 
-# Lee un objeto suelto; nil si no está o está roto
+# Lee un objeto, suelto o de un pack; nil si no está o está roto
 func objeto_leer(id: String) -> Objeto
     z = leer_fichero(ruta_objeto(id))
     if z == nil
-        return nil
+        return pack_leer(id)
     end
     t = zlib_descomprimir(z.buf, z.n, 0)
     trozo_libre(z)
@@ -155,6 +158,316 @@ func objeto_leer(id: String) -> Objeto
     end
     trozo_libre(t)
     return o
+end
+
+# ---- packs (.git/objects/pack/*.idx versión 2 y su .pack) ----
+
+struct Pack
+    ruta: String = ""      # el .pack
+    idx: Pointer = nil     # el .idx entero
+    n: Int = 0             # cuántos objetos
+    tam: Int = 0           # bytes del .pack
+    fh: Int = 0            # el .pack abierto (0 si no)
+end
+
+var _packs: [Pack] = []
+var _packs_leidos: Bool = false
+
+func _cargar_packs()
+    _packs_leidos = true
+    d = git_dir + "/objects/pack"
+    n = dir_read(d)
+    var nombres: [String] = []
+    i = 0
+    while i < n
+        if str_ends(dir_entry_name(i), ".idx")
+            nombres.push(dir_entry_name(i))
+        end
+        i = i + 1
+    end
+    for nombre in nombres
+        t = leer_fichero(d + "/" + nombre)
+        if t != nil and t.n > 1032 and buffer_get_long(t.buf, 0) == 0xFF744F63 and buffer_get_long(t.buf, 4) == 2
+            p = Pack()
+            p.idx = t.buf
+            p.n = buffer_get_long(t.buf, 8 + 255 * 4)
+            p.ruta = d + "/" + nombre[:nombre.length - 4] + ".pack"
+            p.tam = file_size(p.ruta)
+            if p.tam > 32
+                _packs.push(p)
+            else
+                trozo_libre(t)
+            end
+        else
+            trozo_libre(t)
+        end
+    end
+end
+
+# Compara los 20 bytes de a + ia con los de b + ib: <0, 0 o >0
+func _cmp20(a: Pointer, ia: Int, b: Pointer, ib: Int) -> Int
+    k = 0
+    while k < 20
+        x = buffer_get_byte(a, ia + k) - buffer_get_byte(b, ib + k)
+        if x != 0
+            return x
+        end
+        k = k + 1
+    end
+    return 0
+end
+
+# La posición de un id (20 bytes en bin) en un pack, o -1
+func _pack_posicion(p: Pack, bin: Pointer) -> Int
+    primero = buffer_get_byte(bin, 0)
+    lo = 0
+    if primero > 0
+        lo = buffer_get_long(p.idx, 8 + (primero - 1) * 4)
+    end
+    hi = buffer_get_long(p.idx, 8 + primero * 4)
+    while lo < hi
+        m = (lo + hi) / 2
+        c = _cmp20(p.idx, 1032 + m * 20, bin, 0)
+        if c == 0
+            return m
+        end
+        if c < 0
+            lo = m + 1
+        else
+            hi = m
+        end
+    end
+    return -1
+end
+
+# Dónde empieza en el .pack el objeto que está en la posición i del .idx
+func _pack_offset(p: Pack, i: Int) -> Int
+    tabla = 1032 + p.n * 24
+    v = buffer_get_long(p.idx, tabla + i * 4)
+    if v < 0
+        grande = tabla + p.n * 4 + (v & 0x7FFFFFFF) * 8
+        if buffer_get_long(p.idx, grande) != 0
+            return -1
+        end
+        return buffer_get_long(p.idx, grande + 4)
+    end
+    return v
+end
+
+struct Hallado
+    pack: Pack = nil
+    offset: Int = 0
+end
+
+# En qué pack está un objeto, y dónde; nil si en ninguno
+func pack_buscar(id: String) -> Hallado
+    if not _packs_leidos
+        _cargar_packs()
+    end
+    if _packs.length == 0
+        return nil
+    end
+    bin = buffer_alloc(20)
+    de_hex(id, bin, 0)
+    for p in _packs
+        i = _pack_posicion(p, bin)
+        if i >= 0
+            buffer_free(bin)
+            h = Hallado()
+            h.pack = p
+            h.offset = _pack_offset(p, i)
+            return h
+        end
+    end
+    buffer_free(bin)
+    return nil
+end
+
+func pack_leer(id: String) -> Objeto
+    h = pack_buscar(id)
+    if h == nil or h.offset < 0
+        return nil
+    end
+    return _pack_leer_en(h.pack, h.offset, 0)
+end
+
+const _TIPOS = ["", "commit", "tree", "blob", "tag"]
+
+# El objeto que empieza en offset de un pack (con sus deltas resueltos)
+func _pack_leer_en(p: Pack, off: Int, prof: Int) -> Objeto
+    if prof > 64
+        return nil
+    end
+    if p.fh == 0
+        p.fh = file_open(p.ruta, 1005)
+        if p.fh == 0
+            return nil
+        end
+    end
+    cab = buffer_alloc(32)
+    file_seek(p.fh, off, -1)
+    file_read(p.fh, cab, 32)
+    c = buffer_get_byte(cab, 0)
+    tipo = (c >> 4) & 7
+    tam = c & 15
+    sh = 4
+    k = 1
+    while (c & 0x80) != 0
+        c = buffer_get_byte(cab, k)
+        tam = tam | ((c & 0x7F) << sh)
+        sh = sh + 7
+        k = k + 1
+    end
+    base_off = -1
+    base_id = ""
+    if tipo == 6
+        c = buffer_get_byte(cab, k)
+        k = k + 1
+        v = c & 0x7F
+        while (c & 0x80) != 0
+            c = buffer_get_byte(cab, k)
+            k = k + 1
+            v = ((v + 1) << 7) | (c & 0x7F)
+        end
+        base_off = off - v
+    elif tipo == 7
+        base_id = a_hex(cab, k, 20)
+        k = k + 20
+    end
+    buffer_free(cab)
+    if tipo == 0 or tipo == 5
+        return nil
+    end
+    # lo comprimido ocupa como mucho un poco más que lo descomprimido; no se pasa del final del pack
+    ini = off + k
+    max_in = tam + tam / 16 + 64
+    resto = p.tam - 20 - ini
+    if max_in > resto
+        max_in = resto
+    end
+    z = buffer_alloc(max_in + 1)
+    file_seek(p.fh, ini, -1)
+    leidos = file_read(p.fh, z, max_in)
+    datos = buffer_alloc(tam + 1)
+    r = inflate_auto(z, leidos, datos, tam + 1)
+    buffer_free(z)
+    if r != tam
+        buffer_free(datos)
+        return nil
+    end
+    if tipo <= 4
+        o = Objeto()
+        o.tipo = _TIPOS[tipo]
+        o.datos = datos
+        o.n = tam
+        return o
+    end
+    var base: Objeto = nil
+    if tipo == 6
+        base = _pack_leer_en(p, base_off, prof + 1)
+    else
+        base = objeto_leer(base_id)
+    end
+    if base == nil
+        buffer_free(datos)
+        return nil
+    end
+    o = _delta_aplicar(base, datos, tam)
+    objeto_libre(base)
+    buffer_free(datos)
+    return o
+end
+
+# Un número de tamaño de un delta (base 128, el byte bajo primero) desde d + pos[0]; avanza pos[0]
+func _varint(d: Pointer, pos: [Int]) -> Int
+    v = 0
+    sh = 0
+    c = 128
+    while (c & 0x80) != 0
+        c = buffer_get_byte(d, pos[0])
+        pos[0] = pos[0] + 1
+        v = v | ((c & 0x7F) << sh)
+        sh = sh + 7
+    end
+    return v
+end
+
+# Aplica un delta de git a su base; nil si no encaja
+func _delta_aplicar(base: Objeto, d: Pointer, n: Int) -> Objeto
+    var pos: [Int] = [0]
+    tam_base = _varint(d, pos)
+    tam_fin = _varint(d, pos)
+    if tam_base != base.n
+        return nil
+    end
+    out = buffer_alloc(tam_fin + 1)
+    o = 0
+    i = pos[0]
+    while i < n
+        c = buffer_get_byte(d, i)
+        i = i + 1
+        if (c & 0x80) != 0
+            desde = 0
+            cuanto = 0
+            if (c & 1) != 0
+                desde = buffer_get_byte(d, i)
+                i = i + 1
+            end
+            if (c & 2) != 0
+                desde = desde | (buffer_get_byte(d, i) << 8)
+                i = i + 1
+            end
+            if (c & 4) != 0
+                desde = desde | (buffer_get_byte(d, i) << 16)
+                i = i + 1
+            end
+            if (c & 8) != 0
+                desde = desde | (buffer_get_byte(d, i) << 24)
+                i = i + 1
+            end
+            if (c & 16) != 0
+                cuanto = buffer_get_byte(d, i)
+                i = i + 1
+            end
+            if (c & 32) != 0
+                cuanto = cuanto | (buffer_get_byte(d, i) << 8)
+                i = i + 1
+            end
+            if (c & 64) != 0
+                cuanto = cuanto | (buffer_get_byte(d, i) << 16)
+                i = i + 1
+            end
+            if cuanto == 0
+                cuanto = 0x10000
+            end
+            if desde < 0 or desde + cuanto > base.n or o + cuanto > tam_fin
+                buffer_free(out)
+                return nil
+            end
+            buffer_copy(out, o, base.datos, desde, cuanto)
+            o = o + cuanto
+        elif c > 0
+            if o + c > tam_fin or i + c > n
+                buffer_free(out)
+                return nil
+            end
+            buffer_copy(out, o, d, i, c)
+            i = i + c
+            o = o + c
+        else
+            buffer_free(out)
+            return nil
+        end
+    end
+    if o != tam_fin
+        buffer_free(out)
+        return nil
+    end
+    r = Objeto()
+    r.tipo = base.tipo
+    r.datos = out
+    r.n = tam_fin
+    return r
 end
 
 # ---- árboles ----

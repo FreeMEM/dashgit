@@ -63,3 +63,9 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   hacia abajo (0, -1), así que los bucles que pueden estar vacíos van con `while`.
 - 2026-11-04: con los builtins de Dash (PR #108) fuera el SHA-1 en Dash puro; zona de Locale y código de retorno
   10 cuando una orden falla. Las tres pruebas, bien.
+- 2026-11-04: fase 3 (`tests/fase3.sh`): packs v2 con su `.idx` (búsqueda por la tabla de 256, offsets de 64 bits)
+  y deltas `ofs` y `ref`. Lo comprimido de cada objeto se lee de una vez: como mucho su tamaño + 1/16 + 64 bytes,
+  e inflate ignora lo que sobra. Un clon del PC con `git gc --aggressive` (11 objetos con delta) da en el Amiga el
+  mismo log y los mismos blobs; status limpio, checkout de otra rama y commit encima, y el git del PC lo da por
+  bueno. Pendiente: ids abreviados que solo están en packs, y una caché de bases para cadenas de deltas largas.
+  FS-UAE no abre los ficheros de solo lectura del PC (git deja así los packs): la prueba les quita esa marca.
