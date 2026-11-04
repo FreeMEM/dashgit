@@ -188,6 +188,7 @@ func orden_rm(args: [String])
                 Print "rm '" + utf8_to_latin1(idx[i].ruta) + "'"
                 if not solo_indice
                     file_delete(ruta_amiga(idx[i].ruta))
+                    _quitar_cajones_vacios(ruta_padre(ruta_amiga(idx[i].ruta)))
                 end
                 idx.remove(i)
             end
