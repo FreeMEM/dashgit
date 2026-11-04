@@ -80,3 +80,9 @@ Cada prueba acaba con "TODO BIEN". Las de formato comparan con lo que hace el gi
   añadir, confirmar con mensaje, pull, push) y `GIT`/`SALIDA` por ARexx; su `tests/git.sh` hace init, commit,
   diff, log y push a un servidor del PC desde Forja. Pendiente: marcar en el panel del proyecto los ficheros
   cambiados.
+- 2026-11-04: fusiones (`tests/fusion.sh`): `merge rama` (avance rápido, o de tres vías con el antepasado común más
+  cercano), por líneas; lo que choca va entre marcas `<<<<<<<`/`=======`/`>>>>>>>` y en el índice con las etapas
+  1-3, como git. `status` dice "sin fusionar" (UU), `add` lo da por resuelto, `commit` sin -m usa MERGE_MSG y pone
+  los dos padres; `merge --abort`. El árbol fusionado es el mismo que da git. `pull` fusiona cuando los dos lados
+  tienen commits. En FS-UAE, desde el noveno programa con red de un mismo arranque ya no se abre bsdsocket.library
+  (pasado a la sesión de Dash): por eso la parte nueva de `tests/fase4.sh` (pull que fusiona y su push) falla allí.

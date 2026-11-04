@@ -1,0 +1,583 @@
+# dashgit - fusionar ramas: antepasado común, fusión de tres vías por líneas, conflictos
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "diff.dash"
+
+# ---- el antepasado común ----
+
+# Los padres de un commit ("" si no se puede leer)
+func _padres_de(id: String) -> [String]
+    var r: [String] = []
+    o = objeto_leer(id)
+    if o != nil
+        r = commit_padres(o)
+        objeto_libre(o)
+    end
+    return r
+end
+
+# Un antepasado común de a y b (el más cercano a b por anchura); "" si no tienen
+func base_comun(a: String, b: String) -> String
+    var de_a: {String: Int} = {}
+    var cola: [String] = [a]
+    i = 0
+    while i < cola.length and i < 50000
+        id = cola[i]
+        i = i + 1
+        if de_a.get(id, 0) == 0
+            de_a[id] = 1
+            for p in _padres_de(id)
+                cola.push(p)
+            end
+        end
+    end
+    var vistos: {String: Int} = {}
+    var cola2: [String] = [b]
+    i = 0
+    while i < cola2.length and i < 50000
+        id = cola2[i]
+        i = i + 1
+        if de_a.get(id, 0) == 1
+            return id
+        end
+        if vistos.get(id, 0) == 0
+            vistos[id] = 1
+            for p in _padres_de(id)
+                cola2.push(p)
+            end
+        end
+    end
+    return ""
+end
+
+# ---- fusión de tres vías de un texto ----
+
+struct Trozo3
+    ini: Int = 0               # líneas de la base [ini, fin) que cambian
+    fin: Int = 0
+    nuevas: [String] = []      # por qué se cambian
+end
+
+# Los cambios de base a otro, como trozos sobre la base
+func trozos_de(base: [String], otro: [String]) -> [Trozo3]
+    var r: [Trozo3] = []
+    var ops: [String] = operaciones(base, otro)
+    ib = 0
+    io = 0
+    k = 0
+    while k < ops.length
+        if ops[k] == " "
+            ib = ib + 1
+            io = io + 1
+            k = k + 1
+        else
+            t = Trozo3()
+            t.ini = ib
+            while k < ops.length and ops[k] != " "
+                if ops[k] == "-"
+                    ib = ib + 1
+                else
+                    t.nuevas.push(otro[io])
+                    io = io + 1
+                end
+                k = k + 1
+            end
+            t.fin = ib
+            r.push(t)
+        end
+    end
+    return r
+end
+
+# Las líneas de base[desde, hasta) con los trozos de l que caen ahí
+func _aplicar(base: [String], desde: Int, hasta: Int, l: [Trozo3]) -> [String]
+    var r: [String] = []
+    i = desde
+    for t in l
+        if t.ini >= desde and t.fin <= hasta
+            while i < t.ini
+                r.push(base[i])
+                i = i + 1
+            end
+            for x in t.nuevas
+                r.push(x)
+            end
+            i = t.fin
+        end
+    end
+    while i < hasta
+        r.push(base[i])
+        i = i + 1
+    end
+    return r
+end
+
+func _iguales(a: [String], b: [String]) -> Bool
+    if a.length != b.length
+        return false
+    end
+    i = 0
+    while i < a.length
+        if a[i] != b[i]
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+struct Fusion3
+    lineas: [String] = []
+    conflictos: Int = 0
+end
+
+# Fusiona los cambios de base a nuestro y de base a suyo. Lo que choca va entre marcas de conflicto.
+func fusionar_lineas(base: [String], nuestro: [String], suyo: [String], nombre_suyo: String) -> Fusion3
+    f = Fusion3()
+    var tn: [Trozo3] = trozos_de(base, nuestro)
+    var ts: [Trozo3] = trozos_de(base, suyo)
+    i = 0      # por dónde va la base
+    a = 0
+    b = 0
+    while a < tn.length or b < ts.length
+        # la región que empieza con el siguiente trozo, y todos los que la tocan
+        ini = 0
+        fin = 0
+        if b >= ts.length or (a < tn.length and tn[a].ini <= ts[b].ini)
+            ini = tn[a].ini
+            fin = tn[a].fin
+        else
+            ini = ts[b].ini
+            fin = ts[b].fin
+        end
+        var rn: [Trozo3] = []
+        var rs: [Trozo3] = []
+        crece = true
+        while crece
+            crece = false
+            if a < tn.length and tn[a].ini <= fin
+                if tn[a].fin > fin
+                    fin = tn[a].fin
+                end
+                if tn[a].ini < ini
+                    ini = tn[a].ini
+                end
+                rn.push(tn[a])
+                a = a + 1
+                crece = true
+            end
+            if b < ts.length and ts[b].ini <= fin
+                if ts[b].fin > fin
+                    fin = ts[b].fin
+                end
+                if ts[b].ini < ini
+                    ini = ts[b].ini
+                end
+                rs.push(ts[b])
+                b = b + 1
+                crece = true
+            end
+        end
+        while i < ini
+            f.lineas.push(base[i])
+            i = i + 1
+        end
+        var ln: [String] = _aplicar(base, ini, fin, rn)
+        var ls: [String] = _aplicar(base, ini, fin, rs)
+        if rs.length == 0
+            for x in ln
+                f.lineas.push(x)
+            end
+        elif rn.length == 0
+            for x in ls
+                f.lineas.push(x)
+            end
+        elif _iguales(ln, ls)
+            for x in ln
+                f.lineas.push(x)
+            end
+        else
+            f.conflictos = f.conflictos + 1
+            f.lineas.push("<<<<<<< HEAD")
+            for x in ln
+                f.lineas.push(x)
+            end
+            f.lineas.push("=======")
+            for x in ls
+                f.lineas.push(x)
+            end
+            f.lineas.push(">>>>>>> " + nombre_suyo)
+        end
+        i = fin
+    end
+    while i < base.length
+        f.lineas.push(base[i])
+        i = i + 1
+    end
+    return f
+end
+
+# ---- leer y escribir textos por líneas, sin perder el último salto ----
+
+struct Texto3
+    lineas: [String] = []
+    salto_final: Bool = true
+    binario: Bool = false
+end
+
+func texto_de(id: String) -> Texto3
+    t = Texto3()
+    if id == ""
+        return t
+    end
+    o = objeto_leer(id)
+    if o == nil
+        t.binario = true
+        return t
+    end
+    mira = o.n
+    if mira > 8000
+        mira = 8000
+    end
+    if mira > 0 and buffer_find_byte(o.datos, 0, mira, 0) >= 0
+        t.binario = true
+        objeto_libre(o)
+        return t
+    end
+    i = 0
+    while i < o.n
+        nl = buffer_find_byte(o.datos, i, o.n, 10)
+        if nl < 0
+            t.lineas.push(str_from_buffer(o.datos, i, o.n - i))
+            t.salto_final = false
+            i = o.n
+        else
+            t.lineas.push(str_from_buffer(o.datos, i, nl - i))
+            i = nl + 1
+        end
+    end
+    objeto_libre(o)
+    return t
+end
+
+# Guarda unas líneas como blob; su id
+func blob_de_lineas(l: [String], salto_final: Bool) -> String
+    s = ""
+    i = 0
+    while i < l.length
+        s = s + l[i]
+        if i < l.length - 1 or salto_final
+            s = s + "\n"
+        end
+        i = i + 1
+    end
+    return objeto_escribir_texto("blob", s)
+end
+
+# ---- fusionar dos commits ----
+
+struct ResultadoFusion
+    ficheros: [EntradaIndice] = []    # el índice que queda (con etapas 1-3 en los conflictos)
+    conflictos: [String] = []
+    error: String = ""
+end
+
+func _mapa(l: [EntradaIndice]) -> {String: Int}
+    var m: {String: Int} = {}
+    i = 0
+    while i < l.length
+        m[l[i].ruta] = i + 1
+        i = i + 1
+    end
+    return m
+end
+
+func _entrada(ruta: String, id: String, modo: Int, etapa: Int) -> EntradaIndice
+    e = EntradaIndice()
+    e.ruta = ruta
+    e.id = id
+    e.modo = modo
+    e.etapa = etapa
+    return e
+end
+
+func _juntar_rutas(l: [EntradaIndice], rutas: [String], vistas: {String: Int})
+    for e in l
+        if vistas.get(e.ruta, 0) == 0
+            vistas[e.ruta] = 1
+            rutas.push(e.ruta)
+        end
+    end
+end
+
+# La fusión de tres vías de los ficheros de base, nuestro y suyo (commits)
+func fusionar_commits(base: String, nuestro: String, suyo: String, nombre_suyo: String) -> ResultadoFusion
+    r = ResultadoFusion()
+    var f_base: [EntradaIndice] = ficheros_de_commit(base)
+    var f_nuestro: [EntradaIndice] = ficheros_de_commit(nuestro)
+    var f_suyo: [EntradaIndice] = ficheros_de_commit(suyo)
+    if f_base == nil or f_nuestro == nil or f_suyo == nil
+        r.error = "falta algún objeto de los commits"
+        return r
+    end
+    var mb: {String: Int} = _mapa(f_base)
+    var mn: {String: Int} = _mapa(f_nuestro)
+    var ms: {String: Int} = _mapa(f_suyo)
+    var rutas: [String] = []
+    var vistas: {String: Int} = {}
+    _juntar_rutas(f_base, rutas, vistas)
+    _juntar_rutas(f_nuestro, rutas, vistas)
+    _juntar_rutas(f_suyo, rutas, vistas)
+    rutas.sort(fn(x, y) -> x < y)
+    for ruta in rutas
+        ib = ""
+        inn = ""
+        isu = ""
+        modo_b = MODO_FICHERO
+        modo_n = MODO_FICHERO
+        modo_s = MODO_FICHERO
+        p = mb.get(ruta, 0)
+        if p > 0
+            ib = f_base[p - 1].id
+            modo_b = f_base[p - 1].modo
+        end
+        p = mn.get(ruta, 0)
+        if p > 0
+            inn = f_nuestro[p - 1].id
+            modo_n = f_nuestro[p - 1].modo
+        end
+        p = ms.get(ruta, 0)
+        if p > 0
+            isu = f_suyo[p - 1].id
+            modo_s = f_suyo[p - 1].modo
+        end
+        if inn == isu
+            if inn != ""
+                r.ficheros.push(_entrada(ruta, inn, modo_n, 0))
+            end
+        elif ib == inn
+            # solo cambió lo suyo
+            if isu != ""
+                r.ficheros.push(_entrada(ruta, isu, modo_s, 0))
+            end
+        elif ib == isu
+            # solo cambió lo nuestro
+            if inn != ""
+                r.ficheros.push(_entrada(ruta, inn, modo_n, 0))
+            end
+        else
+            # cambió en los dos lados
+            hecho = false
+            if inn != "" and isu != ""
+                tb = texto_de(ib)
+                tn = texto_de(inn)
+                ts = texto_de(isu)
+                if not tb.binario and not tn.binario and not ts.binario
+                    f = fusionar_lineas(tb.lineas, tn.lineas, ts.lineas, nombre_suyo)
+                    id = blob_de_lineas(f.lineas, tn.salto_final)
+                    if f.conflictos == 0
+                        r.ficheros.push(_entrada(ruta, id, modo_n, 0))
+                        hecho = true
+                    else
+                        # en el árbol de trabajo, el fichero con las marcas; en el índice, las tres versiones
+                        if ib != ""
+                            r.ficheros.push(_entrada(ruta, ib, modo_b, 1))
+                        end
+                        r.ficheros.push(_entrada(ruta, inn, modo_n, 2))
+                        r.ficheros.push(_entrada(ruta, isu, modo_s, 3))
+                        r.conflictos.push(ruta + "\t" + id)
+                        hecho = true
+                    end
+                end
+            end
+            if not hecho
+                # borrado en un lado y cambiado en el otro, o binario: conflicto, y se queda lo nuestro
+                if ib != ""
+                    r.ficheros.push(_entrada(ruta, ib, modo_b, 1))
+                end
+                if inn != ""
+                    r.ficheros.push(_entrada(ruta, inn, modo_n, 2))
+                end
+                if isu != ""
+                    r.ficheros.push(_entrada(ruta, isu, modo_s, 3))
+                end
+                quedar = inn
+                if quedar == ""
+                    quedar = isu
+                end
+                r.conflictos.push(ruta + "\t" + quedar)
+            end
+        end
+    end
+    return r
+end
+
+# ---- la orden ----
+
+# Fusiona el commit "suyo" en la rama actual; mensaje del commit de la fusión. true si acabó (con o sin commit).
+func fusionar(suyo: String, nombre_suyo: String, mensaje: String) -> Bool
+    mio = head_id()
+    if mio == ""
+        aviso("aún no hay commits en esta rama")
+        return false
+    end
+    if file_exists(git_dir + "/MERGE_HEAD")
+        aviso("ya hay una fusión a medias (dashgit status)")
+        return false
+    end
+    e = estado(true)
+    if e == nil
+        return false
+    end
+    if e.conflictos.length > 0 or e.preparados.length > 0 or e.sin_preparar.length > 0
+        aviso("hay cambios sin commit; haz commit de ellos antes de fusionar")
+        return false
+    end
+    if suyo == mio or es_antepasado(suyo, mio)
+        Print "Ya está al día."
+        return true
+    end
+    base = base_comun(mio, suyo)
+    var antes: [EntradaIndice] = ficheros_de_commit(mio)
+    if base == mio
+        # avance rápido
+        var despues: [EntradaIndice] = ficheros_de_commit(suyo)
+        if antes == nil or despues == nil
+            aviso("falta algún objeto")
+            return false
+        end
+        if not cambiar_arbol(antes, despues)
+            return false
+        end
+        _mover_rama(suyo)
+        Print "Avance rápido: " + mio[:7] + ".." + suyo[:7]
+        return true
+    end
+    if base == ""
+        aviso("las dos ramas no tienen historia en común")
+        return false
+    end
+    r = fusionar_commits(base, mio, suyo, nombre_suyo)
+    if r.error != ""
+        aviso(r.error)
+        return false
+    end
+    # el árbol de trabajo: lo de la etapa 0, y el fichero con marcas en los conflictos
+    var trabajo: [EntradaIndice] = []
+    var con_conflicto: {String: String} = {}
+    for c in r.conflictos
+        tab = str_find(c, "\t")
+        con_conflicto[c[:tab]] = c[tab + 1:]
+    end
+    for x in r.ficheros
+        if x.etapa == 0
+            trabajo.push(x)
+        end
+    end
+    for c in r.conflictos
+        tab = str_find(c, "\t")
+        trabajo.push(_entrada(c[:tab], c[tab + 1:], MODO_FICHERO, 0))
+    end
+    if not cambiar_arbol(antes, trabajo)
+        return false
+    end
+    if r.conflictos.length == 0
+        # sin conflictos: el commit de la fusión
+        var idx: [EntradaIndice] = indice_leer()
+        arbol = arbol_del_indice(idx)
+        firma = firma_ahora()
+        if firma == ""
+            aviso("falta user.name o user.email (dashgit config)")
+            return false
+        end
+        var padres: [String] = [mio, suyo]
+        id = commit_crear(arbol, padres, latin1_to_utf8(firma), latin1_to_utf8(mensaje))
+        if id == ""
+            aviso("no se pudo guardar el commit de la fusión")
+            return false
+        end
+        _mover_rama(id)
+        Print "Fusión hecha: " + id[:7] + " " + mensaje
+        return true
+    end
+    # con conflictos: el índice con las tres etapas, y MERGE_HEAD para el commit de después
+    var idx2: [EntradaIndice] = indice_leer()
+    var final: [EntradaIndice] = []
+    for x in idx2
+        if con_conflicto.get(x.ruta, "") == ""
+            final.push(x)
+        end
+    end
+    for x in r.ficheros
+        if x.etapa > 0
+            final.push(x)
+        end
+    end
+    indice_escribir(final)
+    file_write_text(git_dir + "/MERGE_HEAD", suyo + "\n")
+    file_write_text(git_dir + "/MERGE_MSG", latin1_to_utf8(mensaje) + "\n")
+    for c in r.conflictos
+        Print "CONFLICTO en " + utf8_to_latin1(c[:str_find(c, "\t")])
+    end
+    aviso("la fusión tiene conflictos: arréglalos, haz dashgit add de esos ficheros y dashgit commit")
+    return false
+end
+
+func _mover_rama(id: String)
+    rama = head_rama()
+    if rama == ""
+        file_write_text(git_dir + "/HEAD", id + "\n")
+    else
+        ref_escribir(rama, id)
+    end
+end
+
+# Deja la fusión a medias como estaba antes de empezarla
+func fusion_abortar()
+    if not file_exists(git_dir + "/MERGE_HEAD")
+        aviso("no hay ninguna fusión a medias")
+        return
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    var antes: [EntradaIndice] = []
+    var vistas: {String: Int} = {}
+    for x in idx
+        if vistas.get(x.ruta, 0) == 0
+            vistas[x.ruta] = 1
+            antes.push(_entrada(x.ruta, "", x.modo, 0))
+        end
+    end
+    var despues: [EntradaIndice] = ficheros_de_commit(head_id())
+    if despues == nil
+        aviso("falta algún objeto de HEAD")
+        return
+    end
+    # sin mirar cambios: la fusión los hizo
+    cambiar_arbol_con(antes, despues, false)
+    file_delete(git_dir + "/MERGE_HEAD")
+    file_delete(git_dir + "/MERGE_MSG")
+    Print "Fusión deshecha."
+end
+
+func orden_merge(args: [String])
+    if args.length < 1
+        aviso("uso: merge rama | merge --abort")
+        return
+    end
+    if args[0] == "--abort"
+        fusion_abortar()
+        return
+    end
+    nombre = args[0]
+    suyo = resolver(nombre)
+    if suyo == ""
+        aviso("no existe " + nombre)
+        return
+    end
+    rama = head_rama()
+    destino = ""
+    if rama != "" and rama != "refs/heads/main" and rama != "refs/heads/master"
+        destino = " into " + rama[11:]
+    end
+    fusionar(suyo, nombre, "Merge branch '" + nombre + "'" + destino)
+end

@@ -96,6 +96,15 @@ func orden_add(args: [String])
         for f in todos
             if dentro_de(f.ruta, c)
                 hallado = true
+                # si tenía conflicto (etapas 1-3), se da por resuelto
+                q = idx.length - 1
+                while q >= 0
+                    if idx[q].ruta == f.ruta and idx[q].etapa > 0
+                        idx.remove(q)
+                        cambios = cambios + 1
+                    end
+                    q = q - 1
+                end
                 p = indice_buscar(idx, f.ruta)
                 if p >= 0 or not ignorada(f.ruta) or f.ruta == c
                     if p >= 0 and idx[p].tam == f.tam and idx[p].mtime == f.mtime
@@ -194,6 +203,7 @@ end
 # ---- status ----
 
 struct Estado
+    conflictos: [String] = []    # "sin fusionar: x" (corto: "UU x")
     preparados: [String] = []    # "nuevo: x", "cambiado: x", "borrado: x" (corto: "A  x"...)
     sin_preparar: [String] = []
     nuevos: [String] = []
@@ -202,8 +212,8 @@ end
 # Compara HEAD, el índice y el árbol de trabajo. corto: las líneas como git status -s.
 func estado(corto: Bool) -> Estado
     r = Estado()
-    var idx: [EntradaIndice] = indice_leer()
-    if idx == nil
+    var todo_idx: [EntradaIndice] = indice_leer()
+    if todo_idx == nil
         aviso(indice_error)
         return nil
     end
@@ -211,6 +221,19 @@ func estado(corto: Bool) -> Estado
     if cab == nil
         aviso("falta algún objeto del commit de HEAD")
         return nil
+    end
+    # los ficheros con conflicto aparte; el resto, solo la etapa 0
+    var en_conflicto: {String: Int} = {}
+    var idx: [EntradaIndice] = []
+    for e in todo_idx
+        if e.etapa > 0
+            if en_conflicto.get(e.ruta, 0) == 0
+                en_conflicto[e.ruta] = 1
+                r.conflictos.push(_linea(corto, "UU", "sin fusionar: ", e.ruta))
+            end
+        else
+            idx.push(e)
+        end
     end
     # HEAD contra el índice
     var en_cab: {String: Int} = {}
@@ -234,7 +257,7 @@ func estado(corto: Bool) -> Estado
         i = i + 1
     end
     for e in cab
-        if en_idx.get(e.ruta, 0) == 0
+        if en_idx.get(e.ruta, 0) == 0 and en_conflicto.get(e.ruta, 0) == 0
             r.preparados.push(_linea(corto, "D ", "borrado:    ", e.ruta))
         end
     end
@@ -267,7 +290,7 @@ func estado(corto: Bool) -> Estado
         end
     end
     for f in todos
-        if en_idx.get(f.ruta, 0) == 0 and not ignorada(f.ruta)
+        if en_idx.get(f.ruta, 0) == 0 and en_conflicto.get(f.ruta, 0) == 0 and not ignorada(f.ruta)
             if corto
                 r.nuevos.push("?? " + f.ruta)
             else
@@ -275,7 +298,7 @@ func estado(corto: Bool) -> Estado
             end
         end
     end
-    if refrescar
+    if refrescar and r.conflictos.length == 0
         indice_escribir(idx)
     end
     return r
@@ -300,6 +323,9 @@ func orden_status(args: [String])
         return
     end
     if corto
+        for l in e.conflictos
+            Print utf8_to_latin1(l)
+        end
         for l in e.preparados
             Print utf8_to_latin1(l)
         end
@@ -319,6 +345,22 @@ func orden_status(args: [String])
     end
     if head_id() == ""
         Print "Aún no hay commits"
+    end
+    if file_exists(git_dir + "/MERGE_HEAD")
+        Print ""
+        if e.conflictos.length > 0
+            Print "Fusión a medias: arregla los conflictos y haz dashgit add y dashgit commit"
+            Print "(o dashgit merge --abort para dejarlo como estaba)."
+        else
+            Print "Fusión a medias: los conflictos están resueltos; haz dashgit commit para acabarla."
+        end
+    end
+    if e.conflictos.length > 0
+        Print ""
+        Print "Sin fusionar:"
+        for l in e.conflictos
+            Print "        " + utf8_to_latin1(l)
+        end
     end
     if e.preparados.length > 0
         Print ""
@@ -341,7 +383,7 @@ func orden_status(args: [String])
             Print "        " + utf8_to_latin1(l)
         end
     end
-    if e.preparados.length == 0 and e.sin_preparar.length == 0 and e.nuevos.length == 0
+    if e.conflictos.length == 0 and e.preparados.length == 0 and e.sin_preparar.length == 0 and e.nuevos.length == 0
         Print "No hay nada que confirmar: el árbol de trabajo está limpio"
     end
 end
@@ -367,6 +409,20 @@ func orden_commit(args: [String])
             i = i + 1
         end
         i = i + 1
+    end
+    fusion = ""
+    if file_exists(git_dir + "/MERGE_HEAD")
+        fusion = str_trim(file_read_text(git_dir + "/MERGE_HEAD"))[:40]
+        if mensaje == "" and file_exists(git_dir + "/MERGE_MSG")
+            mensaje = utf8_to_latin1(str_trim(file_read_text(git_dir + "/MERGE_MSG")))
+        end
+        var idc: [EntradaIndice] = indice_leer()
+        for e in idc
+            if e.etapa > 0
+                aviso("quedan conflictos sin resolver (" + utf8_to_latin1(e.ruta) + "): arréglalos y haz dashgit add")
+                return
+            end
+        end
     end
     if mensaje == ""
         aviso("falta el mensaje: dashgit commit -m \"mensaje\"")
@@ -401,11 +457,14 @@ func orden_commit(args: [String])
     end
     var padres: [String] = []
     if padre != ""
-        if commit_arbol(padre) == arbol
+        if fusion == "" and commit_arbol(padre) == arbol
             Print "No hay cambios para el commit (dashgit add para añadirlos)"
             return
         end
         padres.push(padre)
+    end
+    if fusion != ""
+        padres.push(fusion)
     end
     id = commit_crear(arbol, padres, latin1_to_utf8(firma), latin1_to_utf8(mensaje))
     if id == ""
@@ -430,6 +489,10 @@ func orden_commit(args: [String])
     nl = str_find(primera, "\n")
     if nl >= 0
         primera = primera[:nl]
+    end
+    if fusion != ""
+        file_delete(git_dir + "/MERGE_HEAD")
+        file_delete(git_dir + "/MERGE_MSG")
     end
     Print "[" + nombre + raiz_txt + " " + id[:7] + "] " + primera
 end
@@ -633,6 +696,10 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
     if mirar
         e = estado(true)
         if e == nil
+            return false
+        end
+        if e.conflictos.length > 0
+            aviso("hay conflictos sin resolver (dashgit status)")
             return false
         end
         for l in e.preparados

@@ -8,7 +8,7 @@ dash=${1:-$HOME/Projects/FreeMEMLang}
 aqui=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 puerto=$((20000 + RANDOM % 20000))
-trap 'kill $srv 2>/dev/null; rm -rf "$tmp"' EXIT
+trap 'kill $srv 2>/dev/null; [ -n "$GUARDA" ] || rm -rf "$tmp"' EXIT   # GUARDA=1: deja el disco para mirarlo
 cp -r "$HOME/.cache/dash-emu/sys31" "$tmp/sys"
 chmod -R u+w "$tmp/sys"
 mkdir -p "$tmp/sys/S" "$tmp/srv" "$tmp/obra"
@@ -64,6 +64,19 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   r "pull"                              # 14
   r "log --oneline -n 2"                # 15
   r "fetch"                             # 16 (nada nuevo)
+  r "config user.name AmigaB"           # 17
+  r "config user.email b@b"             # 18
+  echo "CD DH0:A"
+  echo "Echo \"tercero\" >>amiga.txt"
+  r "commit -am tercero-de-A"           # 19
+  r "push"                              # 20
+  echo "CD DH0:B"
+  echo "Echo \"solo de B\" >b.txt"
+  r "add b.txt"                         # 21
+  r "commit -m de-B"                    # 22
+  r "pull"                              # 23 tiene que fusionar
+  r "push"                              # 24 la fusión
+  r "status -s"                         # 25
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-600} --set bsdsocket_library=1 --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -83,13 +96,17 @@ contiene "push al día" 10 "al día"
 contiene "segundo push" 13 "main -> main"
 contiene "pull" 14 "Avance rápido"
 contiene "log tras pull" 15 "segundo-del-amiga"
-[ "$(git -C "$tmp/srv/origen.git" log --format=%s -1 main)" = "segundo-del-amiga" ] && bien "el servidor tiene los commits" || mal "el servidor no tiene los commits"
+contiene "pull que fusiona" 23 "Fusión hecha"
+contiene "push de la fusión" 24 "main -> main"
+[ -z "$(ver 25)" ] && bien "B limpio tras fusionar" || { mal "status de B:"; ver 25; }
+[ "$(git -C "$tmp/srv/origen.git" log --format=%s -1 main)" = "Merge branch 'main' of $url" ] && bien "el servidor tiene la fusión" || { mal "el servidor no tiene la fusión:"; git -C "$tmp/srv/origen.git" log --oneline -3 main; }
+[ "$(git -C "$tmp/srv/origen.git" log --format=%s main | grep -c 'tercero-de-A\|de-B\|segundo-del-amiga')" = 3 ] && bien "el servidor tiene los commits" || mal "el servidor no tiene los commits"
 git -C "$tmp/srv/origen.git" fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5 || true
 for c in A B; do
   (cd "$d/$c" && git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -3) || true
   [ -z "$(cd "$d/$c" && git status --porcelain)" ] && bien "git status limpio en $c" || { mal "git status en $c:"; (cd "$d/$c" && git status --porcelain | head -3); }
 done
-[ "$(cat "$d/B/amiga.txt")" = "$(printf 'desde el Amiga\notra vez')" ] && bien "fichero tras pull" || { mal "fichero tras pull:"; cat "$d/B/amiga.txt"; }
+[ "$(cat "$d/B/amiga.txt")" = "$(printf 'desde el Amiga\notra vez\ntercero')" ] && bien "fichero tras pull" || { mal "fichero tras pull:"; cat "$d/B/amiga.txt"; }
 [ "$(git -C "$d/A" rev-parse v1.0)" = "$(git -C "$tmp/obra" rev-parse v1.0)" ] && bien "etiqueta" || mal "etiqueta"
 echo "-- peticiones:"; cat "$tmp/srv/peticiones.txt" | cut -c1-110
 [ $fallos -eq 0 ] && echo "TODO BIEN"

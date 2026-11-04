@@ -1,7 +1,7 @@
 # dashgit - la red: protocolo "smart" de git por HTTP, clone, fetch, pull y push
 # Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
 
-import "diff.dash"
+import "fusion.dash"
 import "http.dash"
 
 const CERO = "0000000000000000000000000000000000000000"
@@ -655,7 +655,7 @@ func orden_pull(args: [String])
         return
     end
     if not es_antepasado(mio, suyo)
-        aviso("tu rama y la del remoto tienen commits distintos; dashgit aún no sabe fusionarlas")
+        fusionar(suyo, nombre + "/" + corta, "Merge branch '" + corta + "' of " + remoto_url(nombre))
         return
     end
     var antes: [EntradaIndice] = ficheros_de_commit(mio)
