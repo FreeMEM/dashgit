@@ -1,0 +1,31 @@
+# dashgit - SHA-1 y adler32
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+#
+# Hoy con el SHA-1 en Dash puro (sha1.dash). Cuando Dash tenga sha1 y adler32 como builtins, solo cambia este
+# fichero.
+
+import "sha1.dash"
+
+# El SHA-1 de n bytes de buf, en hexadecimal
+func hash_hex(buf: Pointer, n: Int) -> String
+    return sha1d_hex(buf, n)
+end
+
+# El adler32 de n bytes de buf (el de zlib)
+func adler(buf: Pointer, n: Int) -> Int
+    a = 1
+    b = 0
+    i = 0
+    while i < n
+        a = a + buffer_get_byte(buf, i)
+        if a >= 65521
+            a = a - 65521
+        end
+        b = b + a
+        if b >= 65521
+            b = b - 65521
+        end
+        i = i + 1
+    end
+    return (b << 16) | a
+end

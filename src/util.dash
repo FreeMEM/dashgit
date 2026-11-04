@@ -1,0 +1,167 @@
+# dashgit - utilidades: rutas, búferes y hexadecimal
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+# Unos bytes en un búfer (el dueño lo libera con trozo_libre)
+struct Trozo
+    buf: Pointer = nil
+    n: Int = 0
+end
+
+func trozo_libre(t: Trozo)
+    if t != nil and t.buf != nil
+        buffer_free(t.buf)
+        t.buf = nil
+    end
+end
+
+const _HEXD = "0123456789abcdef"
+
+# n bytes de buf + desde en hexadecimal
+func a_hex(buf: Pointer, desde: Int, n: Int) -> String
+    r = ""
+    i = 0
+    while i < n
+        v = buffer_get_byte(buf, desde + i)
+        r = r + _HEXD[(v >> 4) & 15] + _HEXD[v & 15]
+        i = i + 1
+    end
+    return r
+end
+
+func _hex_valor(c: Int) -> Int
+    if c >= 48 and c <= 57
+        return c - 48
+    end
+    if c >= 97 and c <= 102
+        return c - 87
+    end
+    if c >= 65 and c <= 70
+        return c - 55
+    end
+    return -1
+end
+
+# Escribe los bytes de un texto hexadecimal en buf + desde; false si no es hexadecimal
+func de_hex(h: String, buf: Pointer, desde: Int) -> Bool
+    n = h.length / 2
+    i = 0
+    while i < n
+        a = _hex_valor(str_code(h, i * 2))
+        b = _hex_valor(str_code(h, i * 2 + 1))
+        if a < 0 or b < 0
+            return false
+        end
+        buffer_set_byte(buf, desde + i, a * 16 + b)
+        i = i + 1
+    end
+    return true
+end
+
+# Si un texto es un id de objeto entero (40 cifras hexadecimales)
+func es_id(h: String) -> Bool
+    if h.length != 40
+        return false
+    end
+    for i in (0..39)
+        if _hex_valor(str_code(h, i)) < 0
+            return false
+        end
+    end
+    return true
+end
+
+# Une un cajón y un nombre con la sintaxis del Amiga
+func ruta_unir(a: String, b: String) -> String
+    if a == ""
+        return b
+    end
+    if str_ends(a, ":") or str_ends(a, "/")
+        return a + b
+    end
+    return a + "/" + b
+end
+
+# La última posición de sub en s, o -1
+func ultima_pos(s: String, sub: String) -> Int
+    r = -1
+    i = str_find(s, sub)
+    while i >= 0
+        r = i
+        i = str_find_from(s, sub, i + 1)
+    end
+    return r
+end
+
+# El cajón que contiene una ruta ("" si ya es la raíz de un volumen)
+func ruta_padre(p: String) -> String
+    q = p
+    if str_ends(q, "/")
+        q = q[:q.length - 1]
+    end
+    i = ultima_pos(q, "/")
+    if i >= 0
+        return q[:i]
+    end
+    j = str_find(q, ":")
+    if j >= 0 and j < q.length - 1
+        return q[:j + 1]
+    end
+    return ""
+end
+
+# El nombre del final de una ruta
+func ruta_nombre(p: String) -> String
+    i = ultima_pos(p, "/")
+    if i < 0
+        i = str_find(p, ":")
+    end
+    return p[i + 1:]
+end
+
+# Crea un cajón y los que falten por encima
+func crear_cajones(ruta: String) -> Bool
+    p = ruta
+    if str_ends(p, "/")
+        p = p[:p.length - 1]
+    end
+    if p == "" or str_ends(p, ":") or file_exists(p)
+        return true
+    end
+    padre = ruta_padre(p)
+    if padre != "" and not file_exists(padre)
+        crear_cajones(padre)
+    end
+    if dir_create(p)
+        return true
+    end
+    return dir_read(p) >= 0
+end
+
+# Un fichero entero en un búfer; nil si no se puede leer
+func leer_fichero(ruta: String) -> Trozo
+    n = file_size(ruta)
+    if n < 0
+        return nil
+    end
+    t = Trozo()
+    t.buf = buffer_alloc(n + 1)
+    t.n = n
+    if n > 0
+        if file_load(ruta, t.buf, n) != n
+            trozo_libre(t)
+            return nil
+        end
+    end
+    return t
+end
+
+# Un texto en un búfer nuevo (sin el 0 del final)
+func texto_a_trozo(s: String) -> Trozo
+    t = Trozo()
+    t.n = s.length
+    t.buf = buffer_alloc(t.n + 1)
+    if t.n > 0
+        str_to_buffer(s, t.buf, 0)
+    end
+    return t
+end

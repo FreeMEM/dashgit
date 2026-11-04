@@ -1,0 +1,217 @@
+# dashgit - objetos de git: zlib, objetos sueltos y árboles
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "util.dash"
+import "hash.dash"
+
+# El cajón .git del repositorio (lo pone repo.dash)
+var git_dir: String = ""
+
+struct Objeto
+    tipo: String = ""      # "blob", "tree", "commit" o "tag"
+    datos: Pointer = nil
+    n: Int = 0
+end
+
+func objeto_libre(o: Objeto)
+    if o != nil and o.datos != nil
+        buffer_free(o.datos)
+        o.datos = nil
+    end
+end
+
+# ---- zlib (cabecera 78 9C, deflate y adler32) ----
+
+func zlib_comprimir(src: Pointer, n: Int) -> Trozo
+    max = n + n / 50 + 128
+    t = Trozo()
+    t.buf = buffer_alloc(max + 6)
+    buffer_set_byte(t.buf, 0, 0x78)
+    buffer_set_byte(t.buf, 1, 0x9C)
+    k = deflate(src, n, t.buf + 2, max, 6)
+    if k < 0
+        trozo_libre(t)
+        return nil
+    end
+    buffer_set_long(t.buf, 2 + k, adler(src, n))
+    t.n = k + 6
+    return t
+end
+
+# Descomprime zlib (o deflate); tam: lo que se espera que ocupe (0 si no se sabe)
+func zlib_descomprimir(src: Pointer, n: Int, tam: Int) -> Trozo
+    max = tam
+    if max <= 0
+        max = n * 4 + 256
+    end
+    while true
+        t = Trozo()
+        t.buf = buffer_alloc(max + 1)
+        r = inflate_auto(src, n, t.buf, max)
+        if r >= 0
+            t.n = r
+            return t
+        end
+        trozo_libre(t)
+        if r != -2
+            return nil
+        end
+        max = max * 2
+    end
+    return nil
+end
+
+# ---- objetos sueltos ----
+
+func ruta_objeto(id: String) -> String
+    return git_dir + "/objects/" + id[:2] + "/" + id[2:]
+end
+
+# La cabecera y los datos de un objeto, juntos en un búfer ("blob 5\0hola\n")
+func _con_cabecera(tipo: String, datos: Pointer, n: Int) -> Trozo
+    cab = tipo + " " + str_from_int(n, 10)
+    h = cab.length + 1
+    t = Trozo()
+    t.n = h + n
+    t.buf = buffer_alloc(t.n + 1)
+    str_to_buffer(cab, t.buf, 0)
+    buffer_set_byte(t.buf, cab.length, 0)
+    if n > 0
+        buffer_copy(t.buf, h, datos, 0, n)
+    end
+    return t
+end
+
+# El id de unos datos como objeto de ese tipo; con escribir, lo guarda (si no estaba). "" si no pudo guardarlo.
+func objeto_escribir(tipo: String, datos: Pointer, n: Int, escribir: Bool) -> String
+    t = _con_cabecera(tipo, datos, n)
+    id = hash_hex(t.buf, t.n)
+    if escribir
+        ruta = ruta_objeto(id)
+        if not file_exists(ruta)
+            crear_cajones(git_dir + "/objects/" + id[:2])
+            z = zlib_comprimir(t.buf, t.n)
+            if z == nil
+                trozo_libre(t)
+                return ""
+            end
+            tmp = ruta + ".tmp"
+            ok = file_save(tmp, z.buf, z.n) == z.n
+            trozo_libre(z)
+            if not ok or not file_rename(tmp, ruta)
+                file_delete(tmp)
+                trozo_libre(t)
+                return ""
+            end
+        end
+    end
+    trozo_libre(t)
+    return id
+end
+
+func objeto_escribir_texto(tipo: String, s: String) -> String
+    t = texto_a_trozo(s)
+    id = objeto_escribir(tipo, t.buf, t.n, true)
+    trozo_libre(t)
+    return id
+end
+
+func objeto_existe(id: String) -> Bool
+    return file_exists(ruta_objeto(id))
+end
+
+# Lee un objeto suelto; nil si no está o está roto
+func objeto_leer(id: String) -> Objeto
+    z = leer_fichero(ruta_objeto(id))
+    if z == nil
+        return nil
+    end
+    t = zlib_descomprimir(z.buf, z.n, 0)
+    trozo_libre(z)
+    if t == nil
+        return nil
+    end
+    cero = buffer_find_byte(t.buf, 0, t.n, 0)
+    if cero < 0
+        trozo_libre(t)
+        return nil
+    end
+    cab = str_from_buffer(t.buf, 0, cero)
+    esp = str_find(cab, " ")
+    if esp < 0
+        trozo_libre(t)
+        return nil
+    end
+    o = Objeto()
+    o.tipo = cab[:esp]
+    o.n = Int(cab[esp + 1:])
+    if o.n != t.n - cero - 1
+        trozo_libre(t)
+        return nil
+    end
+    o.datos = buffer_alloc(o.n + 1)
+    if o.n > 0
+        buffer_copy(o.datos, 0, t.buf, cero + 1, o.n)
+    end
+    trozo_libre(t)
+    return o
+end
+
+# ---- árboles ----
+
+struct Entrada
+    modo: String = ""     # "100644", "100755", "40000", "120000", "160000"
+    nombre: String = ""   # en bytes de git (UTF-8)
+    id: String = ""
+end
+
+func modo_tipo(modo: String) -> String
+    if modo == "40000"
+        return "tree"
+    end
+    if modo == "160000"
+        return "commit"
+    end
+    return "blob"
+end
+
+# Las entradas de un árbol
+func arbol_leer(o: Objeto) -> [Entrada]
+    var r: [Entrada] = []
+    i = 0
+    while i < o.n
+        esp = buffer_find_byte(o.datos, i, o.n, 32)
+        cero = buffer_find_byte(o.datos, i, o.n, 0)
+        if esp < 0 or cero < 0 or cero + 21 > o.n
+            break
+        end
+        e = Entrada()
+        e.modo = str_from_buffer(o.datos, i, esp - i)
+        e.nombre = str_from_buffer(o.datos, esp + 1, cero - esp - 1)
+        e.id = a_hex(o.datos, cero + 1, 20)
+        r.push(e)
+        i = cero + 21
+    end
+    return r
+end
+
+# La cabecera de un commit: el valor de un campo ("tree", "parent", "author"...), "" si no está
+func commit_campo(o: Objeto, campo: String) -> String
+    fin = o.n
+    i = 0
+    while i < fin
+        nl = buffer_find_byte(o.datos, i, fin, 10)
+        if nl < 0
+            nl = fin
+        end
+        if nl == i
+            return ""
+        end
+        linea = str_from_buffer(o.datos, i, nl - i)
+        if str_starts(linea, campo + " ")
+            return linea[campo.length + 1:]
+        end
+        i = nl + 1
+    end
+    return ""
+end

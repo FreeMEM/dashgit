@@ -1,0 +1,236 @@
+# dashgit - el repositorio: buscar .git, crearlo, referencias y configuración
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+
+import "objetos.dash"
+
+# El cajón de trabajo (el que contiene .git)
+var raiz: String = ""
+
+# Busca .git desde el cajón actual hacia arriba; false si no hay
+func repo_buscar() -> Bool
+    d = dir_current()
+    while d != ""
+        g = ruta_unir(d, ".git")
+        if file_exists(ruta_unir(g, "HEAD"))
+            raiz = d
+            git_dir = g
+            return true
+        end
+        d = ruta_padre(d)
+    end
+    return false
+end
+
+const CONFIG_NUEVA = "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n\tlogallrefupdates = true\n\tignorecase = true\n"
+
+# Crea un repositorio en un cajón; da "nuevo", "otra vez" o "" si falló
+func repo_crear(d: String) -> String
+    g = ruta_unir(d, ".git")
+    ya = file_exists(ruta_unir(g, "HEAD"))
+    for c in ["", "objects", "objects/info", "objects/pack", "refs", "refs/heads", "refs/tags", "info"]
+        cd = g
+        if c != ""
+            cd = ruta_unir(g, c)
+        end
+        if not crear_cajones(cd)
+            return ""
+        end
+    end
+    if not ya
+        if not file_write_text(ruta_unir(g, "HEAD"), "ref: refs/heads/main\n")
+            return ""
+        end
+        file_write_text(ruta_unir(g, "config"), CONFIG_NUEVA)
+        file_write_text(ruta_unir(g, "description"), "Unnamed repository; edit this file 'description' to name the repository.\n")
+    end
+    raiz = d
+    git_dir = g
+    if ya
+        return "otra vez"
+    end
+    return "nuevo"
+end
+
+# ---- referencias ----
+
+func _primera_linea(s: String) -> String
+    i = str_find(s, "\n")
+    if i >= 0
+        return s[:i]
+    end
+    return s
+end
+
+# El id de una referencia ("refs/heads/main"); "" si no existe
+func ref_leer(nombre: String) -> String
+    ruta = git_dir + "/" + nombre
+    if file_exists(ruta)
+        t = file_read_text(ruta)
+        if t != nil
+            l = str_trim(_primera_linea(t))
+            if str_starts(l, "ref: ")
+                return ref_leer(l[5:])
+            end
+            return l
+        end
+    end
+    # packed-refs: "id nombre" por línea
+    p = git_dir + "/packed-refs"
+    if file_exists(p)
+        t = file_read_text(p)
+        if t != nil
+            for l in str_split(t, "\n")
+                if str_ends(l, " " + nombre) and es_id(l[:40])
+                    return l[:40]
+                end
+            end
+        end
+    end
+    return ""
+end
+
+func ref_escribir(nombre: String, id: String) -> Bool
+    ruta = git_dir + "/" + nombre
+    crear_cajones(ruta_padre(ruta))
+    return file_write_text(ruta, id + "\n")
+end
+
+# La rama de HEAD ("refs/heads/main"), o "" si HEAD apunta a un commit suelto
+func head_rama() -> String
+    t = file_read_text(git_dir + "/HEAD")
+    if t == nil
+        return ""
+    end
+    l = str_trim(_primera_linea(t))
+    if str_starts(l, "ref: ")
+        return l[5:]
+    end
+    return ""
+end
+
+func head_id() -> String
+    return ref_leer("HEAD")
+end
+
+# Un nombre de lo que el usuario escribe (HEAD, una rama, una etiqueta, un id entero o abreviado) a un id; "" si no
+func resolver(nombre: String) -> String
+    if es_id(nombre)
+        return str_lower(nombre)
+    end
+    for pre in ["", "refs/", "refs/tags/", "refs/heads/", "refs/remotes/"]
+        id = ref_leer(pre + nombre)
+        if id != ""
+            return id
+        end
+    end
+    # id abreviado (4 cifras o más): buscarlo entre los objetos sueltos
+    if nombre.length >= 4 and nombre.length < 40
+        n = str_lower(nombre)
+        d = git_dir + "/objects/" + n[:2]
+        cuantos = dir_read(d)
+        hallado = ""
+        i = 0
+        while i < cuantos
+            f = dir_entry_name(i)
+            if str_starts(f, n[2:])
+                if hallado != ""
+                    return ""
+                end
+                hallado = n[:2] + f
+            end
+            i = i + 1
+        end
+        if es_id(hallado)
+            return hallado
+        end
+    end
+    return ""
+end
+
+# ---- configuración (.git/config, formato ini) ----
+
+# El valor de "seccion.clave" ("user.name"); "" si no está
+func config_leer(clave: String) -> String
+    p = str_find(clave, ".")
+    if p < 0
+        return ""
+    end
+    seccion = str_lower(clave[:p])
+    nombre = str_lower(clave[p + 1:])
+    for fichero in [git_dir + "/config", "ENV:dashgit/config", "ENVARC:dashgit/config"]
+        if file_exists(fichero)
+            t = file_read_text(fichero)
+            actual = ""
+            for linea in str_split(t, "\n")
+                l = str_trim(linea)
+                if str_starts(l, "[")
+                    actual = str_lower(str_trim(str_replace(str_replace(l, "[", ""), "]", "")))
+                elif actual == seccion
+                    ig = str_find(l, "=")
+                    if ig > 0 and str_lower(str_trim(l[:ig])) == nombre
+                        return str_trim(l[ig + 1:])
+                    end
+                end
+            end
+        end
+    end
+    return ""
+end
+
+# Pone "seccion.clave" en .git/config (o en el fichero dado)
+func config_poner(clave: String, valor: String, fichero: String) -> Bool
+    p = str_find(clave, ".")
+    if p < 0
+        return false
+    end
+    seccion = str_lower(clave[:p])
+    nombre = str_lower(clave[p + 1:])
+    t = ""
+    if file_exists(fichero)
+        t = file_read_text(fichero)
+    end
+    var lineas: [String] = str_split(t, "\n")
+    if lineas.length > 0 and lineas[lineas.length - 1] == ""
+        lineas.pop()
+    end
+    actual = ""
+    fin_seccion = -1
+    i = 0
+    while i < lineas.length
+        l = str_trim(lineas[i])
+        if str_starts(l, "[")
+            actual = str_lower(str_trim(str_replace(str_replace(l, "[", ""), "]", "")))
+        elif actual == seccion
+            fin_seccion = i
+            ig = str_find(l, "=")
+            if ig > 0 and str_lower(str_trim(l[:ig])) == nombre
+                lineas[i] = "\t" + nombre + " = " + valor
+                return file_write_text(fichero, str_join(lineas) + "\n")
+            end
+        end
+        if actual == seccion and fin_seccion < 0
+            fin_seccion = i
+        end
+        i = i + 1
+    end
+    if fin_seccion >= 0
+        lineas.insert(fin_seccion + 1, "\t" + nombre + " = " + valor)
+    else
+        lineas.push("[" + seccion + "]")
+        lineas.push("\t" + nombre + " = " + valor)
+    end
+    return file_write_text(fichero, str_join(lineas) + "\n")
+end
+
+func str_join(l: [String]) -> String
+    r = ""
+    i = 0
+    while i < l.length
+        if i > 0
+            r = r + "\n"
+        end
+        r = r + l[i]
+        i = i + 1
+    end
+    return r
+end

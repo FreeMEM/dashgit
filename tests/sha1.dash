@@ -1,0 +1,47 @@
+# Prueba de src/sha1.dash con vectores conocidos
+import "../src/sha1.dash"
+
+var fallos: Int = 0
+
+func prueba(nombre: String, t: String, esperado: String)
+    s = sha1_nuevo()
+    sha1_poner_texto(s, t)
+    out = buffer_alloc(20)
+    sha1_acabar(s, out, 0)
+    sha1_libre(s)
+    r = hex_de(out, 0, 20)
+    buffer_free(out)
+    if r == esperado
+        Print "bien " + nombre
+    else
+        Print "FALLO " + nombre + ": " + r
+        fallos = fallos + 1
+    end
+end
+
+Main
+    prueba("vacio", "", "da39a3ee5e6b4b0d3255bfef95601890afd80709")
+    prueba("abc", "abc", "a9993e364706816aba3e25717850c26c9cd0d89d")
+    prueba("448 bits", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", "84983e441c3bd26ebaae4aa1f95129e5e54670f1")
+    # 20000 "a", por partes de 1000
+    s = sha1_nuevo()
+    b = buffer_alloc(1000)
+    buffer_fill(b, 0, 1000, 97)
+    t0 = time_ms()
+    for i in (1..20)
+        sha1_poner(s, b, 0, 1000)
+    end
+    out = buffer_alloc(20)
+    sha1_acabar(s, out, 0)
+    t1 = time_ms()
+    r = hex_de(out, 0, 20)
+    if r == "7e7308ef97590bcb05f9543bee280fb91976e90c"
+        Print "bien 20000 (" + str_from_int(t1 - t0, 10) + " ms)"
+    else
+        Print "FALLO 20000: " + r
+        fallos = fallos + 1
+    end
+    if fallos == 0
+        Print "TODO BIEN"
+    end
+end

@@ -1,0 +1,200 @@
+# dashgit - un cliente de git para AmigaOS, escrito en Dash
+# Copyright (C) 2026 FreeMEM
+#
+# This program is free software; you can redistribute it and/or modify it under the terms of the GNU General
+# Public License version 2 as published by the Free Software Foundation. See LICENSE.
+
+@version "dashgit 0.1"
+@stack 100000
+
+import "repo.dash"
+
+const VERSION = "0.1"
+
+func error(msg: String)
+    Print "dashgit: " + msg
+end
+
+func uso()
+    Print "dashgit " + VERSION + " - git para AmigaOS"
+    Print ""
+    Print "  dashgit init [cajón]"
+    Print "  dashgit hash-object [-w] [-t tipo] fichero"
+    Print "  dashgit cat-file (-t | -s | -p | tipo) objeto"
+    Print "  dashgit config clave [valor]"
+end
+
+func necesita_repo() -> Bool
+    if repo_buscar()
+        return true
+    end
+    error("no hay un repositorio (.git) aquí ni más arriba")
+    return false
+end
+
+# ---- init ----
+
+func orden_init(args: [String])
+    d = dir_current()
+    if args.length > 0
+        d = args[0]
+        crear_cajones(d)
+    end
+    r = repo_crear(d)
+    if r == ""
+        error("no se pudo crear el repositorio en " + d)
+    elif r == "nuevo"
+        Print "Repositorio vacío creado en " + git_dir
+    else
+        Print "Repositorio de " + git_dir + " creado otra vez"
+    end
+end
+
+# ---- hash-object ----
+
+func orden_hash_object(args: [String])
+    escribir = false
+    tipo = "blob"
+    fichero = ""
+    i = 0
+    while i < args.length
+        a = args[i]
+        if a == "-w"
+            escribir = true
+        elif a == "-t"
+            i = i + 1
+            tipo = args[i]
+        else
+            fichero = a
+        end
+        i = i + 1
+    end
+    if fichero == ""
+        error("falta el fichero")
+        return
+    end
+    if escribir and not necesita_repo()
+        return
+    end
+    t = leer_fichero(fichero)
+    if t == nil
+        error("no se puede leer " + fichero)
+        return
+    end
+    id = objeto_escribir(tipo, t.buf, t.n, escribir)
+    trozo_libre(t)
+    if id == ""
+        error("no se pudo guardar el objeto")
+        return
+    end
+    Print id
+end
+
+# ---- cat-file ----
+
+func _rellenar_modo(m: String) -> String
+    r = m
+    while r.length < 6
+        r = "0" + r
+    end
+    return r
+end
+
+func orden_cat_file(args: [String])
+    if args.length < 2
+        error("uso: cat-file (-t | -s | -p | tipo) objeto")
+        return
+    end
+    if not necesita_repo()
+        return
+    end
+    que = args[0]
+    id = resolver(args[1])
+    if id == ""
+        error("no existe el objeto " + args[1])
+        return
+    end
+    o = objeto_leer(id)
+    if o == nil
+        error("no se puede leer el objeto " + id)
+        return
+    end
+    if que == "-t"
+        Print o.tipo
+    elif que == "-s"
+        Print o.n
+    elif que == "-p" and o.tipo == "tree"
+        for e in arbol_leer(o)
+            Print _rellenar_modo(e.modo) + " " + modo_tipo(e.modo) + " " + e.id + "\t" + utf8_to_latin1(e.nombre)
+        end
+    elif que == "-p" or que == o.tipo
+        if o.n > 0
+            console_write(str_from_buffer(o.datos, 0, o.n))
+        end
+    else
+        error("el objeto " + id + " es de tipo " + o.tipo)
+    end
+    objeto_libre(o)
+end
+
+# ---- config ----
+
+func orden_config(args: [String])
+    if args.length < 1
+        error("uso: config clave [valor]")
+        return
+    end
+    global = args[0] == "--global"
+    var a: [String] = args
+    if global
+        a = args[1:]
+    end
+    if not global and not necesita_repo()
+        return
+    end
+    if a.length == 1
+        v = config_leer(a[0])
+        if v != ""
+            Print v
+        end
+        return
+    end
+    fichero = git_dir + "/config"
+    if global
+        crear_cajones("ENVARC:dashgit")
+        crear_cajones("ENV:dashgit")
+        config_poner(a[0], a[1], "ENV:dashgit/config")
+        fichero = "ENVARC:dashgit/config"
+    end
+    if not config_poner(a[0], a[1], fichero)
+        error("no se pudo escribir " + fichero)
+    end
+end
+
+Main
+    if arg_count() < 1
+        uso()
+    else
+        orden = arg(0)
+        var args: [String] = []
+        i = 1
+        while i < arg_count()
+            args.push(arg(i))
+            i = i + 1
+        end
+        if orden == "init"
+            orden_init(args)
+        elif orden == "hash-object"
+            orden_hash_object(args)
+        elif orden == "cat-file"
+            orden_cat_file(args)
+        elif orden == "config"
+            orden_config(args)
+        elif orden == "version" or orden == "--version"
+            Print "dashgit " + VERSION
+        else
+            error("orden desconocida: " + orden)
+            uso()
+        end
+    end
+end
