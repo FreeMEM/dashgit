@@ -76,10 +76,14 @@ func operaciones(a: [String], b: [String]) -> [String]
     end
     x = fa - ini
     y = fb - ini
-    if x > 0 and y > 0 and (x + 1) * (y + 1) <= MAX_CELDAS
-        # LCS: t[i][j] = lo más largo común de a[ini+i..fa) y b[ini+j..fb)
-        w = y + 1
+    # la tabla del LCS solo si cabe (sin multiplicar: con muchas líneas, (x + 1) * (y + 1) se sale de 32 bits)
+    var t: Pointer = nil
+    w = y + 1
+    if x > 0 and y > 0 and x + 1 <= MAX_CELDAS / (y + 1)
         t = buffer_alloc((x + 1) * w * 2)
+    end
+    if t != nil
+        # LCS: t[i][j] = lo más largo común de a[ini+i..fa) y b[ini+j..fb)
         buffer_fill(t, 0, (x + 1) * w * 2, 0)
         i = x - 1
         while i >= 0

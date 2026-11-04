@@ -33,7 +33,7 @@ Pendientes:
 
 - [x] **T1 (8).** Cambios en el mismo segundo: al escribir el índice, las entradas con fecha igual o posterior a
   la de ahora menos 1 s van con mtime 0, para que la siguiente vez se comparen por su contenido (como hace git).
-- [ ] **T2 (9).** Desbordamiento en el diff: comprobar `(x + 1) * (y + 1) <= MAX_CELDAS` sin multiplicar (dividir),
+- [x] **T2 (9).** Desbordamiento en el diff: comprobar `(x + 1) * (y + 1) <= MAX_CELDAS` sin multiplicar (dividir),
   y si `buffer_alloc` da nil, el diff sencillo (todo quitado y puesto).
 - [ ] **T3 (10).** Etiquetas anotadas: una función que lleva una etiqueta a su commit (campo "object" del objeto
   tag), usada en checkout, branch, log, merge, diff y donde se espere un commit. `cat-file` sigue enseñando la
@@ -72,3 +72,5 @@ Pendientes:
   Además: dashgit pasa a "0.1 alfa" (README, ayuda, $VER) y Forja 0.3 sale con el menú "Git (alfa)".
 - 2026-11-04: T1 hecho. `indice_escribir` pone fecha 0 a las entradas de este segundo o del anterior; la prueba
   nueva de `tests/arreglos.sh` (mismo tamaño en el mismo segundo) falla sin el arreglo y pasa con él. Todas, bien.
+- 2026-11-04: T2 hecho. La tabla del LCS se comprueba sin multiplicar y, si no hay memoria, el diff sencillo.
+  `tests/diff.sh` lleva un diff de 47000 líneas distintas en cada lado (antes se salía de 32 bits): bien.
