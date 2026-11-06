@@ -81,6 +81,16 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   r "pull"                              # 23 tiene que fusionar
   r "push"                              # 24 la fusión
   r "status -s"                         # 25
+  # una rama nueva: solo manda su commit nuevo, no lo que el remoto ya tiene en main
+  # (antes, pull: si no, A no tiene la fusión de B que está en main del remoto y no sabe que el remoto tiene sus
+  # commits; git haría lo mismo)
+  echo "CD DH0:A"
+  echo "dashgit pull >NIL:"
+  echo "dashgit checkout -b nueva >NIL:"
+  echo "Echo \"rama nueva\" >nueva.txt"
+  echo "dashgit add nueva.txt >NIL:"
+  echo "dashgit commit -m en-nueva >NIL:"
+  echo "dashgit push origin nueva >DH0:R/nueva.txt"
   # el token: a 127.0.0.1 sí (lo de arriba), por http a otra dirección no, y con DASHGIT_HOST de otro host tampoco
   echo "CD DH0:"
   r "clone http://127.0.0.2:$puerto/origen.git C"   # 26
@@ -117,6 +127,9 @@ for c in A B; do
 done
 [ "$(cat "$d/B/amiga.txt")" = "$(printf 'desde el Amiga\notra vez\ntercero')" ] && bien "fichero tras pull" || { mal "fichero tras pull:"; cat "$d/B/amiga.txt"; }
 [ "$(git -C "$d/A" rev-parse v1.0)" = "$(git -C "$tmp/obra" rev-parse v1.0)" ] && bien "etiqueta" || mal "etiqueta"
+grep -q "\[nueva rama\]  nueva -> nueva" "$d/R/nueva.txt" && [ "$(git -C "$tmp/srv/origen.git" rev-parse nueva 2>/dev/null)" = "$(git -C "$d/A" rev-parse nueva)" ] && bien "push de una rama nueva" || { mal "push de una rama nueva:"; cat "$d/R/nueva.txt"; }
+tam=$(grep "POST /origen.git/git-receive-pack" "$tmp/srv/peticiones.txt" | tail -1 | cut -d' ' -f3)
+[ -n "$tam" ] && [ "$tam" -lt 1000 ] && bien "la rama nueva manda solo lo nuevo ($tam bytes)" || mal "la rama nueva manda $tam bytes"
 contiene "clone por 127.0.0.2" 26 "Hecho: rama main"
 contiene "clone con DASHGIT_HOST de otro" 27 "Hecho: rama main"
 p="$tmp/srv/peticiones.txt"

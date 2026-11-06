@@ -42,6 +42,26 @@ ls "$tmp/sys/P/.git/objects/pack/"*.pack >/dev/null
 chmod -R u+w "$tmp/sys/P"
 # git deja los packs de solo lectura, y FS-UAE no los abre así (abre en lectura y escritura): en un Amiga no pasa
 chmod -R u+w "$tmp/sys/P"
+# una historia larga (6001 commits, más de los 5000 que miraba es_antepasado): la rama vieja es el primero
+mkdir -p "$tmp/sys/L"
+git -C "$tmp/sys/L" init -q -b main
+python3 - "$tmp/fi.txt" <<'PY'
+import sys
+with open(sys.argv[1], "w") as f:
+    f.write("blob\nmark :1\ndata 5\nhola\n")
+    for i in range(6001):
+        msg = "c%d\n" % i
+        f.write("commit refs/heads/main\ncommitter PC <p@p> %d +0000\ndata %d\n%s" % (1700000000 + i, len(msg), msg))
+        if i == 0:
+            f.write("M 100644 :1 f.txt\n")
+        f.write("\n")
+PY
+git -C "$tmp/sys/L" fast-import --quiet < "$tmp/fi.txt"
+git -C "$tmp/sys/L" branch vieja main~6000
+git -C "$tmp/sys/L" reset -q --hard main
+git -C "$tmp/sys/L" gc -q
+git -C "$tmp/sys/L" config user.name Amiga; git -C "$tmp/sys/L" config user.email a@a
+chmod -R u+w "$tmp/sys/L"
 sueltos=$(find "$tmp/sys/P/.git/objects" -path '*/pack' -prune -o -type f -print | grep -v info | wc -l)
 echo "objetos sueltos: $sueltos; con delta: $(cd "$tmp/sys/P" && git verify-pack -v .git/objects/pack/*.idx | awk 'NF==7' | wc -l)"
 # blobs con delta, para cat-file
@@ -71,6 +91,8 @@ base=$((2 + ncat))
   echo "dashgit branch de-tag v2 >DH0:R/tag_branch.txt"
   echo "dashgit checkout v2 >DH0:R/tag_checkout.txt"
   echo "dashgit status -s >DH0:R/tag_status.txt"
+  echo "CD DH0:L"
+  echo "dashgit merge vieja >DH0:R/largo_merge.txt"
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-400} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -102,5 +124,7 @@ grep -q "no existe la rama borrar" "$d/R/bd3.txt" && bien "branch -d otra vez: n
 [ "$(git rev-parse de-tag)" = "$(git rev-parse 'v2^{commit}')" ] && bien "branch desde una etiqueta anotada" || { mal "branch de-tag:"; cat "$d/R/tag_branch.txt"; git rev-parse de-tag; }
 grep -q "HEAD suelto" "$d/R/tag_checkout.txt" && [ "$(cat .git/HEAD)" = "$(git rev-parse 'v2^{commit}')" ] && bien "checkout de una etiqueta anotada" || { mal "checkout v2:"; cat "$d/R/tag_checkout.txt"; }
 [ -z "$(cat "$d/R/tag_status.txt")" ] && bien "limpio en la etiqueta" || { mal "status en v2:"; cat "$d/R/tag_status.txt"; }
+# historia larga: vieja ya está en main
+grep -q "Ya está al día" <(iconv -f latin1 -t utf-8 "$d/R/largo_merge.txt") && [ "$(git -C "$d/L" rev-parse main)" = "$(git -C "$d/L" rev-parse main~0)" ] && [ "$(git -C "$d/L" log --format=%s -1 main)" = "c6000" ] && bien "merge en una historia de 6001 commits: al día" || { mal "historia larga:"; cat "$d/R/largo_merge.txt"; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"
 exit 0

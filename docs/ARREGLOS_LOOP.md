@@ -49,7 +49,7 @@ Pendientes:
 - [x] **T6 (13).** Credenciales: el token solo por https, nunca por http (salvo 127.0.0.1 para las pruebas, si hace
   falta), y `DASHGIT_TOKEN` solo a un host si `DASHGIT_HOST` coincide o no hay `DASHGIT_HOST`. Documentar en el
   README cómo poner el token de GitHub.
-- [ ] **T7 (14).** Push y historias largas: un solo recorrido de los antepasados de las ramas remotas que ya
+- [x] **T7 (14).** Push y historias largas: un solo recorrido de los antepasados de las ramas remotas que ya
   tenemos (en vez de `es_antepasado` por cada commit), `es_antepasado` por anchura y sin el tope de 5000, y una rama
   nueva no manda lo que el remoto ya tiene en otras ramas.
 - [ ] **T8 (15).** Cadenas de deltas de hasta 300 (no 64); `user.name`/`user.email` y el mensaje, a UTF-8 solo si
@@ -97,3 +97,9 @@ Pendientes:
   token por http, el aviso dice que use https. El README explica cómo hacer el token de GitHub y ponerlo.
   `tests/fase4.sh`: el servidor apunta el Host y si llega Authorization; con el token puesto, a 127.0.0.1 sí va, a
   127.0.0.2 por http no, y con DASHGIT_HOST de otro host tampoco. Bien. (Por https no se ha probado: T11.)
+- 2026-11-06: T7 hecho. `push` recorre una sola vez los antepasados de todas las ramas y etiquetas del remoto que
+  tenemos (`marcar_antepasados`, fusion.dash), y de ahí saca los commits nuevos; de árboles y blobs solo manda lo que
+  no está en los commits del remoto de los que salen. Una rama nueva ya no manda lo que el remoto tiene en otras.
+  `es_antepasado` va por anchura y sin el tope de 5000. `tests/fase4.sh`: push de una rama nueva (490 bytes; antes
+  mandaba toda la historia) y `tests/fase3.sh`: `merge` de una rama vieja en una historia de 6001 commits da "al
+  día" (antes, con el tope, no la encontraba). Bien.

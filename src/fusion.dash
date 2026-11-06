@@ -18,14 +18,27 @@ end
 
 # Los antepasados de id (con él), en un conjunto
 func _antepasados(id: String, r: {String: Int})
-    var cola: [String] = [id]
+    var ids: [String] = [id]
+    marcar_antepasados(ids, r)
+end
+
+# Los antepasados de todos esos commits (con ellos), en un conjunto, en un solo recorrido; lo que ya está en el
+# conjunto no se recorre otra vez
+func marcar_antepasados(ids: [String], r: {String: Int})
+    var cola: [String] = []
+    for x in ids
+        if r.get(x, 0) == 0
+            r[x] = 1
+            cola.push(x)
+        end
+    end
     i = 0
     while i < cola.length
         x = cola[i]
         i = i + 1
-        if r.get(x, 0) == 0
-            r[x] = 1
-            for p in _padres_de(x)
+        for p in _padres_de(x)
+            if r.get(p, 0) == 0
+                r[p] = 1
                 cola.push(p)
             end
         end
