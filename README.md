@@ -9,6 +9,28 @@ sobre todo en Amigas de verdad y con repositorios grandes. Ten copia de lo impor
 Hace `clone`, `fetch`, `pull` y `push` por http y https (con AmiSSL), y en local `init`, `add`, `rm`, `status`, `commit`, `log`, `branch`, `checkout`, `diff`, `merge` (con conflictos, como git), `merge-base`, `check-ignore`, `config`, `hash-object` y `cat-file`. El plan, por fases, está en
 [docs/DISENO.md](docs/DISENO.md).
 
+## Credenciales (token de GitHub)
+
+Para `push` (y para clonar un repositorio privado) GitHub pide un token, no la contraseña. Se hace en GitHub, en
+Settings > Developer settings > Personal access tokens: un token "fine-grained" con permiso "Contents: Read and
+write" en el repositorio, o uno "classic" con "repo".
+
+En el Amiga, con variables de entorno:
+
+    SetEnv DASHGIT_USUARIO tu_usuario
+    SetEnv DASHGIT_TOKEN ghp_xxxxxxxx
+    SetEnv DASHGIT_HOST github.com
+
+Para que duren tras reiniciar, cópialas a `ENVARC:` (`Copy ENV:DASHGIT#? ENVARC:`), o en OS 3.2 usa `SetEnv SAVE`.
+
+`DASHGIT_HOST` es opcional, pero conviene: así el token solo va a ese servidor. O en el fichero
+`ENVARC:dashgit/credenciales`, con el formato de netrc (un servidor por línea):
+
+    machine github.com login tu_usuario password ghp_xxxxxxxx
+
+El token solo se manda por https (hace falta AmiSSL); por http iría sin cifrar y no se manda nunca (salvo a
+127.0.0.1, que no sale del ordenador).
+
 ## Compilar
 
 Necesita un Dash posterior a la 2.2.0, con el PR #108 (SHA-1, adler32, `inflate_used`...).

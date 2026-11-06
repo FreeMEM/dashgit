@@ -46,7 +46,7 @@ Pendientes:
 - [x] **T5 (12).** .gitignore como git: `*` y `?` no saltan "/", `**`, clases `[...]`, "!" para volver a incluir
   (gana la última regla), y los .gitignore de los cajones. Pasar el comodín a expresión regular (`regex_match`).
   Comparar con `git check-ignore` en el PC.
-- [ ] **T6 (13).** Credenciales: el token solo por https, nunca por http (salvo 127.0.0.1 para las pruebas, si hace
+- [x] **T6 (13).** Credenciales: el token solo por https, nunca por http (salvo 127.0.0.1 para las pruebas, si hace
   falta), y `DASHGIT_TOKEN` solo a un host si `DASHGIT_HOST` coincide o no hay `DASHGIT_HOST`. Documentar en el
   README cómo poner el token de GitHub.
 - [ ] **T7 (14).** Push y historias largas: un solo recorrido de los antepasados de las ramas remotas que ya
@@ -91,3 +91,9 @@ Pendientes:
   .git/info/exclude; con core.ignorecase sin mirar mayúsculas; un .gitignore en Latin-1 se pasa a UTF-8. Orden
   nueva `dashgit check-ignore ruta...`, como la de git. `tests/arreglos.sh` lleva un árbol con 45 ficheros y 21
   reglas (tests/arbol_ignorar.sh): check-ignore de todos y `add .` dan lo mismo que el git del PC. Bien.
+- 2026-11-06: T6 hecho. `autorizacion` (red.dash) recibe la dirección entera: por http no manda el token (salvo a
+  127.0.0.1, que no sale del ordenador; lo usan las pruebas); DASHGIT_TOKEN y DASHGIT_USUARIO solo valen para el
+  host de DASHGIT_HOST si está; el fichero de credenciales compara el host sin mirar mayúsculas. Si el servidor pide
+  token por http, el aviso dice que use https. El README explica cómo hacer el token de GitHub y ponerlo.
+  `tests/fase4.sh`: el servidor apunta el Host y si llega Authorization; con el token puesto, a 127.0.0.1 sí va, a
+  127.0.0.2 por http no, y con DASHGIT_HOST de otro host tampoco. Bien. (Por https no se ha probado: T11.)

@@ -8,11 +8,27 @@ const CERO = "0000000000000000000000000000000000000000"
 
 # ---- credenciales ----
 
-# "Authorization: Basic ...\r\n" para un host, o "" si no hay credenciales
-func autorizacion(host: String) -> String
-    u = env_get("DASHGIT_USUARIO")
-    t = env_get("DASHGIT_TOKEN")
+# "Authorization: Basic ...\r\n" para una dirección, o "" si no hay credenciales para ella. Solo por https: por
+# http irían sin cifrar (salvo a 127.0.0.1, que no sale del ordenador; lo usan las pruebas). DASHGIT_TOKEN y
+# DASHGIT_USUARIO valen para el host de DASHGIT_HOST (para todos si no está); si no, el fichero de credenciales,
+# por host.
+func autorizacion(url: Url) -> String
+    if url == nil
+        return ""
+    end
+    if not url.https and url.host != "127.0.0.1"
+        return ""
+    end
+    host = str_lower(url.host)
+    u = ""
+    t = ""
+    h = str_lower(env_get("DASHGIT_HOST"))
+    if h == "" or h == host
+        u = env_get("DASHGIT_USUARIO")
+        t = env_get("DASHGIT_TOKEN")
+    end
     if t == ""
+        u = ""
         for f in ["ENV:dashgit/credenciales", "ENVARC:dashgit/credenciales"]
             if t == "" and file_exists(f)
                 # formato netrc: machine host login usuario password token
@@ -21,7 +37,7 @@ func autorizacion(host: String) -> String
                 i = 0
                 while i < p.length - 1
                     if p[i] == "machine"
-                        maquina = p[i + 1]
+                        maquina = str_lower(p[i + 1])
                     elif maquina == host and p[i] == "login"
                         u = p[i + 1]
                     elif maquina == host and p[i] == "password"
@@ -108,15 +124,17 @@ func descubrir(url: String, servicio: String) -> Remoto
         r.error = "solo se admiten direcciones http:// y https://"
         return r
     end
-    auth = autorizacion(u.host)
+    auth = autorizacion(u)
     resp = http_pedir("GET", url + "/info/refs?service=" + servicio, "", nil, auth)
     if resp.estado == 0
         r.error = resp.error
         return r
     end
     if resp.estado == 401 or resp.estado == 403
-        if auth == ""
-            r.error = "el servidor pide usuario y token (dashgit config --global, ver el LEEME)"
+        if auth == "" and not u.https
+            r.error = "el servidor pide usuario y token, y por http no se mandan (sin cifrar): usa https"
+        elif auth == ""
+            r.error = "el servidor pide usuario y token (DASHGIT_TOKEN, ver el README)"
         else
             r.error = "el servidor no acepta el usuario o el token"
         end
@@ -225,7 +243,7 @@ func traer_pack(r: Remoto, quiero: [String], tengo: [String]) -> String
     pet = pet + pkt("done\n")
     u = url_partir(r.url)
     cuerpo = texto_a_trozo(pet)
-    resp = http_pedir("POST", r.url + "/git-upload-pack", "application/x-git-upload-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-upload-pack-result\r\n")
+    resp = http_pedir("POST", r.url + "/git-upload-pack", "application/x-git-upload-pack-request", cuerpo, autorizacion(u) + "Accept: application/x-git-upload-pack-result\r\n")
     trozo_libre(cuerpo)
     if resp.estado != 200
         e = resp.error
@@ -876,7 +894,7 @@ func orden_push(args: [String])
     buffer_copy(cuerpo.buf, largo + 4, pack.buf, 0, pack.n)
     trozo_libre(pack)
     u = url_partir(url)
-    resp = http_pedir("POST", url + "/git-receive-pack", "application/x-git-receive-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-receive-pack-result\r\n")
+    resp = http_pedir("POST", url + "/git-receive-pack", "application/x-git-receive-pack-request", cuerpo, autorizacion(u) + "Accept: application/x-git-receive-pack-result\r\n")
     trozo_libre(cuerpo)
     if resp.estado != 200
         e = resp.error
