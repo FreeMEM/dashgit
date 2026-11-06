@@ -34,7 +34,9 @@ open('docs/notas.txt','w').write('notas\n' * (10 + v))
   git tag -a v2 -m "etiqueta anotada" main~2
 )
 git clone -q --no-local "$tmp/origen" "$tmp/sys/P"
-(cd "$tmp/sys/P" && git branch -q otra origin/otra && git gc -q --aggressive && git config user.name Amiga && git config user.email a@a)
+(cd "$tmp/sys/P" && git branch -q otra origin/otra && git branch -q borrar origin/otra && git branch -q borrar2 main~1 && git gc -q --aggressive && git config user.name Amiga && git config user.email a@a)
+# borrar y borrar2 quedan en packed-refs; borrar2 además suelta (con otro commit), para branch -d
+(cd "$tmp/sys/P" && git update-ref refs/heads/borrar2 main~3 && grep -q " refs/heads/borrar$" .git/packed-refs && [ -f .git/refs/heads/borrar2 ])
 ls "$tmp/sys/P/.git/objects/pack/"*.pack >/dev/null
 # git deja los packs de solo lectura y FS-UAE no los abre así (abre en lectura y escritura); en un Amiga no pasa
 chmod -R u+w "$tmp/sys/P"
@@ -49,6 +51,9 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
 {
   echo "MakeDir DH0:R"
   echo "CD DH0:P"
+  echo "dashgit branch -d borrar >DH0:R/bd1.txt"
+  echo "dashgit branch -d borrar2 >DH0:R/bd2.txt"
+  echo "dashgit branch -d borrar >DH0:R/bd3.txt"
   r "log --oneline"                       # 01
   r "status -s"                           # 02
   i=0; for b in $delta; do r "cat-file -p $b"; done   # 03..
@@ -88,6 +93,10 @@ k=$((k+1)); grep -q "desde-el-amiga" "$d/R/$(printf %02d $k).txt" && bien "commi
 [ "$(git log --format=%s -1 otra)" = "desde-el-amiga" ] && bien "git ve el commit" || mal "git ve el commit"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5 || true
 [ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git status --porcelain | head; }
+# branch -d de ramas en packed-refs (borrar2 también suelta)
+grep -q "Rama borrar borrada" "$d/R/bd1.txt" && grep -q "Rama borrar2 borrada" "$d/R/bd2.txt" && bien "branch -d" || { mal "branch -d:"; cat "$d/R/bd1.txt" "$d/R/bd2.txt"; }
+grep -q "no existe la rama borrar" "$d/R/bd3.txt" && bien "branch -d otra vez: no existe" || { mal "branch -d otra vez:"; cat "$d/R/bd3.txt"; }
+[ -z "$(git branch --list 'borrar*')" ] && ! grep -q "refs/heads/borrar" .git/packed-refs && [ ! -e .git/refs/heads/borrar2 ] && git show-ref --verify -q refs/tags/v2 && bien "fuera de packed-refs y lo demás sigue" || { mal "packed-refs:"; cat .git/packed-refs; git branch; }
 # etiqueta anotada (v2 apunta a un objeto tag, no a un commit)
 [ "$(iconv -f latin1 -t utf-8 "$d/R/tag_log.txt")" = "$(git log --oneline v2)" ] && bien "log de una etiqueta anotada" || { mal "log v2:"; cat "$d/R/tag_log.txt"; }
 [ "$(git rev-parse de-tag)" = "$(git rev-parse 'v2^{commit}')" ] && bien "branch desde una etiqueta anotada" || { mal "branch de-tag:"; cat "$d/R/tag_branch.txt"; git rev-parse de-tag; }

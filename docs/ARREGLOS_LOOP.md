@@ -42,7 +42,7 @@ Pendientes:
 - [x] **T3 (10).** Etiquetas anotadas: una función que lleva una etiqueta a su commit (campo "object" del objeto
   tag), usada en checkout, branch, log, merge, diff y donde se espere un commit. `cat-file` sigue enseñando la
   etiqueta.
-- [ ] **T4 (11).** `branch -d` quita también la rama de `packed-refs` (y su línea "^" si la tiene).
+- [x] **T4 (11).** `branch -d` quita también la rama de `packed-refs` (y su línea "^" si la tiene).
 - [ ] **T5 (12).** .gitignore como git: `*` y `?` no saltan "/", `**`, clases `[...]`, "!" para volver a incluir
   (gana la última regla), y los .gitignore de los cajones. Pasar el comodín a expresión regular (`regex_match`).
   Comparar con `git check-ignore` en el PC.
@@ -81,3 +81,6 @@ Pendientes:
 - 2026-11-04: T3 hecho. `resolver_commit` lleva una etiqueta anotada a su commit; lo usan checkout, branch, log,
   merge y merge-base (cat-file sigue con `resolver`). `tests/fase3.sh` lleva una etiqueta anotada hecha en el PC:
   log, branch desde ella, checkout (HEAD suelto) y status limpio. Bien.
+- 2026-11-06: T4 hecho. `ref_borrar` (repo.dash) quita el fichero suelto y la línea de `packed-refs` con su "^";
+  `branch -d` la usa. `tests/fase3.sh` borra una rama que solo está en packed-refs y otra que está en los dos
+  sitios, y comprueba con git que no quedan y que la etiqueta sigue. Bien.

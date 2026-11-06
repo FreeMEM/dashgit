@@ -755,7 +755,10 @@ func orden_branch(args: [String])
             aviso("no existe la rama " + n)
             return
         end
-        file_delete(git_dir + "/refs/heads/" + n)
+        if not ref_borrar("refs/heads/" + n)
+            aviso("no se pudo borrar del todo la rama " + n)
+            return
+        end
         Print "Rama " + n + " borrada (era " + id[:7] + ")"
         return
     end
