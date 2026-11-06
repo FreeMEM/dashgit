@@ -475,6 +475,23 @@ func orden_status(args: [String])
     end
 end
 
+# ---- check-ignore ----
+
+# Escribe las rutas que .gitignore ignora (las demás no); código 1 si no hay ninguna, como git
+func orden_check_ignore(args: [String])
+    hubo = false
+    for a in args
+        r = ruta_git(a)
+        if r != "?" and r != "" and ignorada(r)
+            Print a
+            hubo = true
+        end
+    end
+    if not hubo and codigo == 0
+        codigo = 1
+    end
+end
+
 # ---- commit ----
 
 func orden_commit(args: [String])

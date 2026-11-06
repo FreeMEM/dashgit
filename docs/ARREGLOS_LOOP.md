@@ -43,7 +43,7 @@ Pendientes:
   tag), usada en checkout, branch, log, merge, diff y donde se espere un commit. `cat-file` sigue enseñando la
   etiqueta.
 - [x] **T4 (11).** `branch -d` quita también la rama de `packed-refs` (y su línea "^" si la tiene).
-- [ ] **T5 (12).** .gitignore como git: `*` y `?` no saltan "/", `**`, clases `[...]`, "!" para volver a incluir
+- [x] **T5 (12).** .gitignore como git: `*` y `?` no saltan "/", `**`, clases `[...]`, "!" para volver a incluir
   (gana la última regla), y los .gitignore de los cajones. Pasar el comodín a expresión regular (`regex_match`).
   Comparar con `git check-ignore` en el PC.
 - [ ] **T6 (13).** Credenciales: el token solo por https, nunca por http (salvo 127.0.0.1 para las pruebas, si hace
@@ -84,3 +84,10 @@ Pendientes:
 - 2026-11-06: T4 hecho. `ref_borrar` (repo.dash) quita el fichero suelto y la línea de `packed-refs` con su "^";
   `branch -d` la usa. `tests/fase3.sh` borra una rama que solo está en packed-refs y otra que está en los dos
   sitios, y comprueba con git que no quedan y que la etiqueta sigue. Bien.
+- 2026-11-06: T5 hecho. El .gitignore va como git (indice.dash): cada regla pasa a expresión regular ("*" y "?"
+  sin saltar "/", "**/", "/**", "/**/", clases [a-z] [!a] [[:alpha:]], "\" para tomar un carácter tal cual) o a
+  comparación directa si no tiene comodines; "!" vuelve a incluir (gana la última regla que encaja); un cajón
+  ignorado ignora todo lo de dentro; se leen los .gitignore de cada cajón (el más hondo manda) y después
+  .git/info/exclude; con core.ignorecase sin mirar mayúsculas; un .gitignore en Latin-1 se pasa a UTF-8. Orden
+  nueva `dashgit check-ignore ruta...`, como la de git. `tests/arreglos.sh` lleva un árbol con 45 ficheros y 21
+  reglas (tests/arbol_ignorar.sh): check-ignore de todos y `add .` dan lo mismo que el git del PC. Bien.

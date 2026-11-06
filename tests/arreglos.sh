@@ -4,7 +4,8 @@
 #  - un fichero "a" que pasa a cajón "a/" con add, y checkout entre una rama con el fichero y otra con el cajón;
 #  - merge-base en un caso con dos antepasados comunes (el bueno es el de git);
 #  - fusión con una última línea sin salto: conflicto, como git;
-#  - un cambio del mismo tamaño en el mismo segundo se ve.
+#  - un cambio del mismo tamaño en el mismo segundo se ve;
+#  - .gitignore como git (tests/arbol_ignorar.sh): check-ignore y add comparados con los del PC.
 # Acaba con "TODO BIEN".
 #
 #   DASH_KICKSTART=... tests/arreglos.sh [DASH_DIR]
@@ -40,6 +41,14 @@ printf 'dentro\n' > "$tmp/sys/V/x"
   git merge --abort 2>/dev/null || true; git checkout -q main; git branch -q -D prueba-pc
 )
 chmod -R u+w "$tmp/sys/M"
+# .gitignore: el mismo árbol en el disco (G) y en el PC (G2), con lo que git ignora y lo que añade
+mkdir -p "$tmp/sys/G" "$tmp/G2"
+(cd "$tmp/sys/G" && bash "$aqui/tests/arbol_ignorar.sh")
+(cd "$tmp/G2" && bash "$aqui/tests/arbol_ignorar.sh" && git init -q && echo '*.excl' > .git/info/exclude &&
+  find . -path ./.git -prune -o -type f -print | sed 's|^\./||' | LC_ALL=C sort > "$tmp/rutas_g.txt" &&
+  git -c core.ignorecase=true -c core.quotepath=false check-ignore --no-index --stdin < "$tmp/rutas_g.txt" | LC_ALL=C sort > "$tmp/esperado_ci.txt"
+  git -c core.ignorecase=true add -A && git -c core.quotepath=false ls-files > "$tmp/esperado_ls.txt")
+printf '*.excl\n' > "$tmp/sys/V/exclude"
 n=0
 r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
 {
@@ -84,6 +93,23 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   echo "CD DH0:M"
   r "merge-base main f"             # 17
   r "merge s"                       # 18  sin salto final
+  echo "CD DH0:G"
+  echo "dashgit init >NIL:"
+  echo "copia DH0:V/exclude .git/info/exclude"
+  echo "dashgit config user.name Amiga >NIL:"
+  echo "dashgit config user.email a@a >NIL:"
+  # check-ignore de cada fichero, de cuatro en cuatro; los nombres que no son ASCII, de uno en uno por una
+  # variable de ENV: (en Latin-1)
+  LC_ALL=C grep -v '[^ -~]' "$tmp/rutas_g.txt" | xargs -n 4 -d '\n' | sed 's/^/dashgit check-ignore /; s/$/ >>DH0:R\/ci.txt/'
+  k=0
+  LC_ALL=C grep '[^ -~]' "$tmp/rutas_g.txt" | while read -r f; do
+    k=$((k+1)); printf '%s' "$f" | iconv -f utf-8 -t latin1 > "$tmp/sys/V/ruta$k"
+    echo "copia DH0:V/ruta$k ENV:ruta$k"
+    echo "dashgit check-ignore \$ruta$k >>DH0:R/ci.txt"
+  done
+  r "add ."                         # 19
+  r "status -s"                     # 20  todo añadido, nada con "??"
+  r "commit -m ignorar"             # 21
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-500} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -105,6 +131,10 @@ if [ "$(cat "$tmp/esperado_salto.txt")" = conflicto ]; then
 else
   ver 18 | grep -q "Fusión hecha" && bien "sin salto final: limpio como git" || { mal "sin salto final:"; ver 18; }
 fi
+# .gitignore
+[ "$(iconv -f latin1 -t utf-8 "$d/R/ci.txt" | LC_ALL=C sort)" = "$(cat "$tmp/esperado_ci.txt")" ] && bien "check-ignore como git" || { mal "check-ignore:"; diff <(iconv -f latin1 -t utf-8 "$d/R/ci.txt" | LC_ALL=C sort) "$tmp/esperado_ci.txt"; }
+[ -n "$(ver 20)" ] && ! ver 20 | grep -q '^??' && bien "status sin nada por añadir con .gitignore" || { mal "status con .gitignore:"; ver 19; ver 20; }
+[ "$(cd "$d/G" && git -c core.quotepath=false ls-files)" = "$(cat "$tmp/esperado_ls.txt")" ] && bien "add con .gitignore como git" || { mal "add con .gitignore:"; diff <(cd "$d/G" && git -c core.quotepath=false ls-files) "$tmp/esperado_ls.txt"; }
 cd "$d/P"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5
 [ "$(git ls-tree --name-only main)" = "$(printf 'README\na\nnuevo.txt\notro.txt\nracy.txt')" ] && [ "$(git ls-tree -r --name-only main | grep -c '^a')" = 1 ] && bien "árbol sin fichero y cajón a la vez" || { mal "árbol:"; git ls-tree -r main; }

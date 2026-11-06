@@ -29,6 +29,7 @@ func uso()
     Print "  dashgit add (fichero | cajón | . | -A)..."
     Print "  dashgit rm [-r] [-f] [--cached] fichero..."
     Print "  dashgit status [-s]"
+    Print "  dashgit check-ignore ruta..."
     Print "  dashgit commit [-a] -m mensaje"
     Print "  dashgit log [--oneline] [-n N] [desde]"
     Print "  dashgit branch [-d] [rama [desde]]"
@@ -217,7 +218,7 @@ Main
             orden_cat_file(args)
         elif orden == "config"
             orden_config(args)
-        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base"
+        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore"
             if necesita_repo()
                 if orden == "add"
                     orden_add(args)
@@ -237,6 +238,8 @@ Main
                     orden_merge(args)
                 elif orden == "merge-base"
                     orden_merge_base(args)
+                elif orden == "check-ignore"
+                    orden_check_ignore(args)
                 else
                     orden_checkout(args)
                 end
