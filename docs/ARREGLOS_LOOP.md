@@ -55,7 +55,7 @@ Pendientes:
 - [x] **T8 (15).** Cadenas de deltas de hasta 300 (no 64); `user.name`/`user.email` y el mensaje, a UTF-8 solo si
   no lo son ya (`utf8_check`); `dashgit config` guarda en UTF-8; `log` enseña todos los commits por fecha, no solo
   el primer padre.
-- [ ] **T9 (5).** Nombres que no caben en Latin-1 ("€", japonés...) o que el disco no admite (":", más de 30
+- [x] **T9 (5).** Nombres que no caben en Latin-1 ("€", japonés...) o que el disco no admite (":", más de 30
   letras en FFS) y dos rutas que solo se diferencian en mayúsculas: al sacarlos, un aviso y se saltan (sin
   pisar nada); `status` no los da por borrados.
 - [x] **T10.** La prueba de red (`tests/fase4.sh`) entera: cuando la sesión de Dash arregle lo de bsdsocket.library
@@ -111,3 +111,14 @@ Pendientes:
   `tests/arreglos.sh` comprueba con git el nombre puesto en Latin-1, un mensaje que ya llega en UTF-8, la config en
   UTF-8 y `log --oneline` de una historia con fusiones, igual que git. Bien. Nota: emu_run.py escribe el
   Startup-Sequence en UTF-8, así que lo de Latin-1 va por variables de ENV:.
+- 2026-11-06: T9 hecho. `fuera_del_disco` (indice.dash) da las rutas que no pueden estar en el disco del Amiga: las
+  que no caben en Latin-1, las que llevan ":", un nombre de más de 30 letras si el disco no los admite (se prueba
+  una vez creando un fichero de nombre largo en .git) y las que solo cambian en mayúsculas de otra que va antes
+  (también un cajón que choca así con un fichero). Al sacar un commit se saltan con un aviso, sin escribir ni
+  borrar nada en su lugar, y se quedan en el índice; status no las da por borradas, y add y commit -a no las quitan.
+  `tests/raros.sh` lleva una rama hecha en el PC con "€", japonés, ":", "readme" junto a "README" y un cajón
+  "OTRO.TXT/" junto a "otro.txt": checkout salta los 5, status limpio, commit -a los conserva y volver a main no
+  borra README. Bien. El caso de más de 30 letras en FFS no se ha probado: el disco del emulador es un cajón del
+  PC y admite nombres largos (allí el nombre largo se escribe bien).
+- 2026-11-06: con T4-T9, todas las pruebas acaban en "TODO BIEN": fase1, fase2, diff, fase3, fusion, raros, arreglos
+  y fase4. Quedan T11 (token de GitHub de verdad) y probar en FFS los nombres de más de 30 letras.

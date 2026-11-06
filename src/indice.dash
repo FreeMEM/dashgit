@@ -197,6 +197,95 @@ func ruta_amiga(r: String) -> String
     return ruta_unir(raiz, utf8_to_latin1(r))
 end
 
+# ---- nombres que no se pueden sacar en este disco ----
+
+var _max_nombre: Int = 0
+
+# El nombre más largo que admite el disco del repositorio: 30 (FFS, OFS) o más (se prueba una vez en .git)
+func nombre_max() -> Int
+    if _max_nombre == 0
+        _max_nombre = 30
+        prueba = "dashgit-prueba-de-nombres-largos.tmp"
+        if file_write_text(git_dir + "/" + prueba, "x")
+            var borrar: [String] = []
+            n = dir_read(git_dir)
+            i = 0
+            while i < n
+                nombre = dir_entry_name(i)
+                if nombre == prueba
+                    _max_nombre = 107
+                end
+                if str_starts(nombre, "dashgit-prueba-de")
+                    borrar.push(nombre)
+                end
+                i = i + 1
+            end
+            for b in borrar
+                file_delete(git_dir + "/" + b)
+            end
+        end
+    end
+    return _max_nombre
+end
+
+# Por qué una ruta de git no se puede escribir en el disco del Amiga; "" si se puede
+func ruta_imposible(ruta: String) -> String
+    l1 = utf8_to_latin1(ruta)
+    if latin1_to_utf8(l1) != ruta
+        return "tiene letras que no caben en Latin-1"
+    end
+    if str_contains(ruta, ":")
+        return "tiene \":\", que el Amiga no admite en un nombre"
+    end
+    for parte in str_split(l1, "/")
+        if parte.length > 30 and parte.length > nombre_max()
+            return "un nombre de más de " + str_from_int(nombre_max(), 10) + " letras, que el disco no admite"
+        end
+    end
+    return ""
+end
+
+# Las rutas de una lista que no pueden estar en el disco del Amiga, con el porqué: las de ruta_imposible, y las que
+# solo se diferencian en mayúsculas de otra que va antes (el disco no distingue; se queda la primera), también si
+# un cajón suyo choca así con un fichero
+func fuera_del_disco(l: [EntradaIndice]) -> {String: String}
+    var r: {String: String} = {}
+    var bajas: {String: String} = {}
+    for e in l
+        razon = ruta_imposible(e.ruta)
+        if razon != ""
+            r[e.ruta] = razon
+        else
+            b = str_lower(utf8_to_latin1(e.ruta))
+            otra = bajas.get(b, "")
+            if otra != "" and otra != e.ruta
+                r[e.ruta] = "solo cambia en mayúsculas de " + utf8_to_latin1(otra) + " (el disco no las distingue)"
+            elif otra == ""
+                bajas[b] = e.ruta
+            end
+        end
+    end
+    for e in l
+        if r.get(e.ruta, "") == ""
+            var partes: [String] = str_split(str_lower(utf8_to_latin1(e.ruta)), "/")
+            pre = ""
+            i = 0
+            while i < partes.length - 1
+                if pre != ""
+                    pre = pre + "/"
+                end
+                pre = pre + partes[i]
+                otra = bajas.get(pre, "")
+                if otra != ""
+                    r[e.ruta] = "su cajón choca con el fichero " + utf8_to_latin1(otra) + " (el disco no distingue mayúsculas)"
+                end
+                i = i + 1
+            end
+        end
+    end
+    return r
+end
+
 struct FicheroTrabajo
     ruta: String = ""     # de git (UTF-8, "/")
     tam: Int = 0

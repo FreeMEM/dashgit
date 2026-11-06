@@ -143,10 +143,11 @@ func orden_add(args: [String])
                 end
             end
         end
-        # borrados del árbol de trabajo
+        # borrados del árbol de trabajo (lo que no puede estar en este disco no cuenta)
+        var fuera: {String: String} = fuera_del_disco(idx)
         i = idx.length - 1
         while i >= 0
-            if dentro_de(idx[i].ruta, c)
+            if dentro_de(idx[i].ruta, c) and fuera.get(idx[i].ruta, "") == ""
                 hallado = true
                 esta = false
                 for f in todos
@@ -357,10 +358,14 @@ func estado(corto: Bool) -> Estado
         i = i + 1
     end
     refrescar = false
+    # lo que no puede estar en este disco no se da por borrado
+    var fuera: {String: String} = fuera_del_disco(idx)
     for e in idx
         p = en_trabajo.get(e.ruta, 0)
         if p == 0
-            r.sin_preparar.push(_linea(corto, " D", "borrado:    ", e.ruta))
+            if fuera.get(e.ruta, "") == ""
+                r.sin_preparar.push(_linea(corto, " D", "borrado:    ", e.ruta))
+            end
         else
             f = todos[p - 1]
             if f.tam != e.tam
@@ -612,11 +617,14 @@ func _add_seguidos(idx: [EntradaIndice]) -> Bool
         en_trabajo[todos[i].ruta] = i + 1
         i = i + 1
     end
+    var fuera: {String: String} = fuera_del_disco(idx)
     i = idx.length - 1
     while i >= 0
         p = en_trabajo.get(idx[i].ruta, 0)
         if p == 0
-            idx.remove(i)
+            if fuera.get(idx[i].ruta, "") == ""
+                idx.remove(i)
+            end
         else
             f = todos[p - 1]
             if f.tam != idx[i].tam or f.mtime != idx[i].mtime
@@ -892,9 +900,15 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         en_despues[despues[i].ruta] = i + 1
         i = i + 1
     end
+    # lo que no puede estar en este disco: se salta (sin pisar ni borrar nada) y se queda en el índice
+    var fuera: {String: String} = fuera_del_disco(despues)
+    var fuera_antes: {String: String} = fuera_del_disco(antes)
     # ¿se perdería algo?
     var mal: [String] = []
     for d in despues
+        if fuera.get(d.ruta, "") != ""
+            continue
+        end
         p = en_antes.get(d.ruta, 0)
         if (p == 0 or antes[p - 1].id != d.id) and tocados.get(d.ruta, 0) == 1
             mal.push(d.ruta)
@@ -927,7 +941,7 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
     end
     # quitar lo que ya no está (antes de escribir: un fichero "a" puede dejar sitio a un cajón "a/")
     for a in antes
-        if en_despues.get(a.ruta, 0) == 0
+        if en_despues.get(a.ruta, 0) == 0 and fuera_antes.get(a.ruta, "") == ""
             file_delete(ruta_amiga(a.ruta))
             _quitar_cajones_vacios(ruta_padre(ruta_amiga(a.ruta)))
         end
@@ -939,7 +953,15 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         p = en_antes.get(d.ruta, 0)
         cambia = p == 0 or antes[p - 1].id != d.id
         q = actual.get(d.ruta, 0)
-        if not cambia and mirar
+        razon = fuera.get(d.ruta, "")
+        if razon != ""
+            Print "dashgit: se salta " + utf8_to_latin1(d.ruta) + ": " + razon
+            x = EntradaIndice()
+            x.ruta = d.ruta
+            x.id = d.id
+            x.modo = d.modo
+            idx.push(x)
+        elif not cambia and mirar
             # igual en los dos commits: se queda lo que tenga el usuario (también si lo borró del disco)
             if q > 0
                 idx.push(idx_actual[q - 1])
