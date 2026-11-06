@@ -62,6 +62,14 @@ git -C "$tmp/sys/L" reset -q --hard main
 git -C "$tmp/sys/L" gc -q
 git -C "$tmp/sys/L" config user.name Amiga; git -C "$tmp/sys/L" config user.email a@a
 chmod -R u+w "$tmp/sys/L"
+# una cadena de 300 deltas (el máximo que admite dashgit, como el --depth de git)
+mkdir -p "$tmp/sys/H"
+git -C "$tmp/sys/H" init -q
+hondo=$(python3 "$aqui/tests/pack_hondo.py" "$tmp/sys/H/.git/objects/pack/pack-h.pack" 300)
+mv "$tmp/sys/H/.git/objects/pack/pack-h.pack.txt" "$tmp/hondo.txt"
+git -C "$tmp/sys/H" index-pack "$tmp/sys/H/.git/objects/pack/pack-h.pack" >/dev/null
+git -C "$tmp/sys/H" verify-pack -v "$tmp/sys/H/.git/objects/pack/pack-h.idx" | grep -q "= 300:"
+chmod -R u+w "$tmp/sys/H"
 sueltos=$(find "$tmp/sys/P/.git/objects" -path '*/pack' -prune -o -type f -print | grep -v info | wc -l)
 echo "objetos sueltos: $sueltos; con delta: $(cd "$tmp/sys/P" && git verify-pack -v .git/objects/pack/*.idx | awk 'NF==7' | wc -l)"
 # blobs con delta, para cat-file
@@ -91,6 +99,8 @@ base=$((2 + ncat))
   echo "dashgit branch de-tag v2 >DH0:R/tag_branch.txt"
   echo "dashgit checkout v2 >DH0:R/tag_checkout.txt"
   echo "dashgit status -s >DH0:R/tag_status.txt"
+  echo "CD DH0:H"
+  echo "dashgit cat-file -p $hondo >DH0:R/hondo.txt"
   echo "CD DH0:L"
   echo "dashgit merge vieja >DH0:R/largo_merge.txt"
 } >> "$tmp/sys/S/Startup-Extra"
@@ -124,6 +134,7 @@ grep -q "no existe la rama borrar" "$d/R/bd3.txt" && bien "branch -d otra vez: n
 [ "$(git rev-parse de-tag)" = "$(git rev-parse 'v2^{commit}')" ] && bien "branch desde una etiqueta anotada" || { mal "branch de-tag:"; cat "$d/R/tag_branch.txt"; git rev-parse de-tag; }
 grep -q "HEAD suelto" "$d/R/tag_checkout.txt" && [ "$(cat .git/HEAD)" = "$(git rev-parse 'v2^{commit}')" ] && bien "checkout de una etiqueta anotada" || { mal "checkout v2:"; cat "$d/R/tag_checkout.txt"; }
 [ -z "$(cat "$d/R/tag_status.txt")" ] && bien "limpio en la etiqueta" || { mal "status en v2:"; cat "$d/R/tag_status.txt"; }
+cmp -s "$d/R/hondo.txt" "$tmp/hondo.txt" && bien "cadena de 300 deltas" || { mal "cadena de 300 deltas:"; head -c 300 "$d/R/hondo.txt"; }
 # historia larga: vieja ya está en main
 grep -q "Ya está al día" <(iconv -f latin1 -t utf-8 "$d/R/largo_merge.txt") && [ "$(git -C "$d/L" rev-parse main)" = "$(git -C "$d/L" rev-parse main~0)" ] && [ "$(git -C "$d/L" log --format=%s -1 main)" = "c6000" ] && bien "merge en una historia de 6001 commits: al día" || { mal "historia larga:"; cat "$d/R/largo_merge.txt"; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"

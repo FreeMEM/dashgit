@@ -52,7 +52,7 @@ Pendientes:
 - [x] **T7 (14).** Push y historias largas: un solo recorrido de los antepasados de las ramas remotas que ya
   tenemos (en vez de `es_antepasado` por cada commit), `es_antepasado` por anchura y sin el tope de 5000, y una rama
   nueva no manda lo que el remoto ya tiene en otras ramas.
-- [ ] **T8 (15).** Cadenas de deltas de hasta 300 (no 64); `user.name`/`user.email` y el mensaje, a UTF-8 solo si
+- [x] **T8 (15).** Cadenas de deltas de hasta 300 (no 64); `user.name`/`user.email` y el mensaje, a UTF-8 solo si
   no lo son ya (`utf8_check`); `dashgit config` guarda en UTF-8; `log` enseña todos los commits por fecha, no solo
   el primer padre.
 - [ ] **T9 (5).** Nombres que no caben en Latin-1 ("€", japonés...) o que el disco no admite (":", más de 30
@@ -103,3 +103,11 @@ Pendientes:
   `es_antepasado` va por anchura y sin el tope de 5000. `tests/fase4.sh`: push de una rama nueva (490 bytes; antes
   mandaba toda la historia) y `tests/fase3.sh`: `merge` de una rama vieja en una historia de 6001 commits da "al
   día" (antes, con el tope, no la encontraba). Bien.
+- 2026-11-06: T8 hecho. Los packs admiten cadenas de hasta 300 deltas (antes 64). La firma, el mensaje y el mensaje
+  de una fusión pasan a UTF-8 solo si no lo son ya (`a_utf8`, util.dash); `dashgit config` guarda en UTF-8 y al
+  enseñar un valor lo pasa a Latin-1. `log` enseña todos los commits (de todos los padres) del más nuevo al más
+  viejo por la fecha del committer, como git log (y la línea "Merge:" en las fusiones). Pruebas:
+  `tests/fase3.sh` lee un blob al final de una cadena de 300 deltas (pack hecho con tests/pack_hondo.py) y
+  `tests/arreglos.sh` comprueba con git el nombre puesto en Latin-1, un mensaje que ya llega en UTF-8, la config en
+  UTF-8 y `log --oneline` de una historia con fusiones, igual que git. Bien. Nota: emu_run.py escribe el
+  Startup-Sequence en UTF-8, así que lo de Latin-1 va por variables de ENV:.

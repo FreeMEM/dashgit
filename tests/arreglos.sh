@@ -5,6 +5,8 @@
 #  - merge-base en un caso con dos antepasados comunes (el bueno es el de git);
 #  - fusión con una última línea sin salto: conflicto, como git;
 #  - un cambio del mismo tamaño en el mismo segundo se ve;
+#  - el nombre (config, en Latin-1) y un mensaje que ya viene en UTF-8 llegan bien en UTF-8 al commit;
+#  - log de una historia con fusiones: todos los padres, por fecha, como git log;
 #  - .gitignore como git (tests/arbol_ignorar.sh): check-ignore y add comparados con los del PC.
 # Acaba con "TODO BIEN".
 #
@@ -33,6 +35,7 @@ printf 'dentro\n' > "$tmp/sys/V/x"
   git checkout -q x; c X1 f7; git checkout -q f; git merge -q --no-edit x
   git checkout -q main; c D f8
   git merge-base main f > "$tmp/esperado_base.txt"
+  git log --oneline f > "$tmp/esperado_log.txt"
   # sin salto final: base "x\ny", main "X\ny", s "x\ny\nz\n"
   printf 'x\ny' > t.txt; git add t.txt; git commit -qm base-t
   git checkout -q -b s; printf 'x\ny\nz\n' > t.txt; git commit -qam s-t
@@ -49,6 +52,7 @@ mkdir -p "$tmp/sys/G" "$tmp/G2"
   git -c core.ignorecase=true -c core.quotepath=false check-ignore --no-index --stdin < "$tmp/rutas_g.txt" | LC_ALL=C sort > "$tmp/esperado_ci.txt"
   git -c core.ignorecase=true add -A && git -c core.quotepath=false ls-files > "$tmp/esperado_ls.txt")
 printf '*.excl\n' > "$tmp/sys/V/exclude"
+printf 'Íñigo' | iconv -f utf-8 -t latin1 > "$tmp/sys/V/nombre"
 n=0
 r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
 {
@@ -90,8 +94,17 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
   r "status -s"                     # 14  tiene que ver el cambio
   r "add racy.txt"                  # 15
   r "commit -m racy"                # 16
+  # UTF-8: el nombre se escribe en Latin-1 (el shell) y el mensaje ya en UTF-8
+  # (emu_run.py lleva el Startup-Sequence en UTF-8: lo de Latin-1 va en variables de ENV:, que el shell pone)
+  echo "copia DH0:V/nombre ENV:nombre"
+  echo "dashgit config user.name \$nombre >NIL:"
+  echo "Echo \"x\" >utf.txt"
+  echo "dashgit add utf.txt >NIL:"
+  echo "dashgit commit -m señal >DH0:R/utf.txt"
+  echo "dashgit config user.name >DH0:R/utf_nombre.txt"
   echo "CD DH0:M"
   r "merge-base main f"             # 17
+  echo "dashgit log --oneline f >DH0:R/log_f.txt"
   r "merge s"                       # 18  sin salto final
   echo "CD DH0:G"
   echo "dashgit init >NIL:"
@@ -131,13 +144,17 @@ if [ "$(cat "$tmp/esperado_salto.txt")" = conflicto ]; then
 else
   ver 18 | grep -q "Fusión hecha" && bien "sin salto final: limpio como git" || { mal "sin salto final:"; ver 18; }
 fi
+# UTF-8 y log
+[ "$(git -C "$d/P" log -1 --format='%an|%s' main)" = "Íñigo|señal" ] && bien "nombre y mensaje en UTF-8" || { mal "UTF-8:"; git -C "$d/P" log -1 --format='%an|%s' main; cat "$d/R/utf.txt"; }
+[ "$(iconv -f latin1 -t utf-8 "$d/R/utf_nombre.txt")" = "Íñigo" ] && grep -q "name = Íñigo" "$d/P/.git/config" && bien "config en UTF-8 (y en Latin-1 en pantalla)" || { mal "config:"; cat "$d/R/utf_nombre.txt"; grep name "$d/P/.git/config"; }
+[ "$(cat "$d/R/log_f.txt")" = "$(cat "$tmp/esperado_log.txt")" ] && bien "log con fusiones como git" || { mal "log con fusiones:"; diff "$d/R/log_f.txt" "$tmp/esperado_log.txt"; }
 # .gitignore
 [ "$(iconv -f latin1 -t utf-8 "$d/R/ci.txt" | LC_ALL=C sort)" = "$(cat "$tmp/esperado_ci.txt")" ] && bien "check-ignore como git" || { mal "check-ignore:"; diff <(iconv -f latin1 -t utf-8 "$d/R/ci.txt" | LC_ALL=C sort) "$tmp/esperado_ci.txt"; }
 [ -n "$(ver 20)" ] && ! ver 20 | grep -q '^??' && bien "status sin nada por añadir con .gitignore" || { mal "status con .gitignore:"; ver 19; ver 20; }
 [ "$(cd "$d/G" && git -c core.quotepath=false ls-files)" = "$(cat "$tmp/esperado_ls.txt")" ] && bien "add con .gitignore como git" || { mal "add con .gitignore:"; diff <(cd "$d/G" && git -c core.quotepath=false ls-files) "$tmp/esperado_ls.txt"; }
 cd "$d/P"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5
-[ "$(git ls-tree --name-only main)" = "$(printf 'README\na\nnuevo.txt\notro.txt\nracy.txt')" ] && [ "$(git ls-tree -r --name-only main | grep -c '^a')" = 1 ] && bien "árbol sin fichero y cajón a la vez" || { mal "árbol:"; git ls-tree -r main; }
+[ "$(git ls-tree --name-only main)" = "$(printf 'README\na\nnuevo.txt\notro.txt\nracy.txt\nutf.txt')" ] && [ "$(git ls-tree -r --name-only main | grep -c '^a')" = 1 ] && bien "árbol sin fichero y cajón a la vez" || { mal "árbol:"; git ls-tree -r main; }
 [ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git status --porcelain; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"
 exit 0

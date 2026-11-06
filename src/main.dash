@@ -174,18 +174,20 @@ func orden_config(args: [String])
     if a.length == 1
         v = config_leer(a[0])
         if v != ""
-            Print v
+            Print a_latin1(v)
         end
         return
     end
+    # se guarda en UTF-8, como git (lo que se escribe en el Amiga viene en Latin-1)
+    valor = a_utf8(a[1])
     fichero = git_dir + "/config"
     if global
         crear_cajones("ENVARC:dashgit")
         crear_cajones("ENV:dashgit")
-        config_poner(a[0], a[1], "ENV:dashgit/config")
+        config_poner(a[0], valor, "ENV:dashgit/config")
         fichero = "ENVARC:dashgit/config"
     end
-    if not config_poner(a[0], a[1], fichero)
+    if not config_poner(a[0], valor, fichero)
         error("no se pudo escribir " + fichero)
     end
 end

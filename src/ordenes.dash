@@ -518,7 +518,7 @@ func orden_commit(args: [String])
     if file_exists(git_dir + "/MERGE_HEAD")
         fusion = str_trim(file_read_text(git_dir + "/MERGE_HEAD"))[:40]
         if mensaje == "" and file_exists(git_dir + "/MERGE_MSG")
-            mensaje = utf8_to_latin1(str_trim(file_read_text(git_dir + "/MERGE_MSG")))
+            mensaje = str_trim(file_read_text(git_dir + "/MERGE_MSG"))
         end
         var idc: [EntradaIndice] = indice_leer()
         for e in idc
@@ -572,7 +572,7 @@ func orden_commit(args: [String])
     if fusion != ""
         padres.push(fusion)
     end
-    id = commit_crear(arbol, padres, latin1_to_utf8(firma), latin1_to_utf8(mensaje))
+    id = commit_crear(arbol, padres, a_utf8(firma), a_utf8(mensaje))
     if id == ""
         aviso("no se pudo guardar el commit")
         return
@@ -666,14 +666,31 @@ func orden_log(args: [String])
         end
         return
     end
+    # todos los commits (de todos los padres), del más nuevo al más viejo por la fecha del committer, como git log:
+    # se saca siempre el pendiente más nuevo (a igual fecha, el que entró antes)
+    var pendientes: [String] = [id]
+    var fechas: [Int] = [_fecha_commit(id)]
+    var vistos_ids: {String: Int} = {}
+    vistos_ids[id] = 1
     vistos = 0
-    while id != "" and (max < 0 or vistos < max)
+    while pendientes.length > 0 and (max < 0 or vistos < max)
+        k = 0
+        q = 1
+        while q < pendientes.length
+            if fechas[q] > fechas[k]
+                k = q
+            end
+            q = q + 1
+        end
+        id = pendientes[k]
+        pendientes.remove(k)
+        fechas.remove(k)
         o = objeto_leer(id)
         if o == nil
             aviso("falta el commit " + id)
             return
         end
-        msg = utf8_to_latin1(commit_mensaje(o))
+        msg = a_latin1(commit_mensaje(o))
         if corto
             nl = str_find(msg, "\n")
             if nl >= 0
@@ -682,8 +699,16 @@ func orden_log(args: [String])
             Print id[:7] + " " + msg
         else
             Print "commit " + id
+            var ps0: [String] = commit_padres(o)
+            if ps0.length > 1
+                l = "Merge:"
+                for pp in ps0
+                    l = l + " " + pp[:7]
+                end
+                Print l
+            end
             autor = commit_campo(o, "author")
-            Print "Autor: " + utf8_to_latin1(firma_quien(autor))
+            Print "Autor: " + a_latin1(firma_quien(autor))
             Print "Fecha: " + firma_fecha(autor)
             Print ""
             for l in str_split(str_trim(msg), "\n")
@@ -693,12 +718,34 @@ func orden_log(args: [String])
         end
         var ps: [String] = commit_padres(o)
         objeto_libre(o)
-        id = ""
-        if ps.length > 0
-            id = ps[0]
+        for pp in ps
+            if vistos_ids.get(pp, 0) == 0
+                vistos_ids[pp] = 1
+                pendientes.push(pp)
+                fechas.push(_fecha_commit(pp))
+            end
         end
         vistos = vistos + 1
     end
+end
+
+# La fecha (segundos) del committer de un commit; 0 si no se puede leer
+func _fecha_commit(id: String) -> Int
+    o = objeto_leer(id)
+    if o == nil
+        return 0
+    end
+    f = commit_campo(o, "committer")
+    objeto_libre(o)
+    i = str_find(f, ">")
+    if i < 0
+        return 0
+    end
+    var p: [String] = str_split(str_trim(f[i + 1:]), " ")
+    if p.length < 1
+        return 0
+    end
+    return str_to_int(p[0], 10)
 end
 
 # ---- branch ----
