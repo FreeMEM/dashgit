@@ -4,12 +4,12 @@
 # This program is free software; you can redistribute it and/or modify it under the terms of the GNU General
 # Public License version 2 as published by the Free Software Foundation. See LICENSE.
 
-@version "dashgit 0.1 alfa"
+@version "dashgit 0.2 alfa"
 @stack 100000
 
 import "red.dash"
 
-const VERSION = "0.1 alfa"
+const VERSION = "0.2 alfa"
 
 func error(msg: String)
     codigo = 10
