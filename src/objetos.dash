@@ -296,9 +296,10 @@ end
 
 const _TIPOS = ["", "commit", "tree", "blob", "tag"]
 
-# El objeto que empieza en offset de un pack (con sus deltas resueltos)
+# El objeto que empieza en offset de un pack (con sus deltas resueltos, hasta 300 encadenados como el --depth
+# más alto que se suele usar con git)
 func pack_leer_en(p: Pack, off: Int, prof: Int) -> Objeto
-    if prof > 64
+    if prof > 300
         return nil
     end
     if p.fh == 0

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Un servidor HTTP de git para las pruebas: git http-backend detrás de http.server (sin cifrar).
 
-    tests/servidor_git.py CAJÓN_RAÍZ PUERTO
+    tests/servidor_git.py CAJÓN_RAÍZ PUERTO [DIRECCIÓN]
 
-Sirve los repositorios de CAJÓN_RAÍZ en http://127.0.0.1:PUERTO/<nombre>, con push permitido (http.receivepack).
-Las peticiones se apuntan en CAJÓN_RAÍZ/peticiones.txt. Con chunked=1 en el entorno, contesta en trozos
+Sirve los repositorios de CAJÓN_RAÍZ en http://127.0.0.1:PUERTO/<nombre> (o en DIRECCIÓN), con push permitido
+(http.receivepack). Las peticiones se apuntan en CAJÓN_RAÍZ/peticiones.txt, con el Host y "auth" si traen
+Authorization. Con chunked=1 en el entorno, contesta en trozos
 (Transfer-Encoding: chunked), como GitHub.
 """
 import os
@@ -14,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 raiz = os.path.abspath(sys.argv[1])
 puerto = int(sys.argv[2])
+direccion = sys.argv[3] if len(sys.argv) > 3 else "127.0.0.1"
 trozos = os.environ.get("chunked") == "1"
 
 
@@ -43,7 +45,7 @@ class Manejador(BaseHTTPRequestHandler):
             elif k:
                 cabeceras.append((k, v.strip()))
         with open(os.path.join(raiz, "peticiones.txt"), "a") as f:
-            f.write(f"{self.command} {self.path} {len(cuerpo)} -> {estado} {len(datos)} {self.headers.get('User-Agent')}\n")
+            f.write(f"{self.command} {self.path} {len(cuerpo)} -> {estado} {len(datos)} {self.headers.get('User-Agent')} Host={self.headers.get('Host')}{' auth' if self.headers.get('Authorization') else ''}\n")
         self.send_response(estado)
         for k, v in cabeceras:
             self.send_header(k, v)
@@ -66,4 +68,4 @@ class Manejador(BaseHTTPRequestHandler):
     do_POST = _cgi
 
 
-ThreadingHTTPServer(("127.0.0.1", puerto), Manejador).serve_forever()
+ThreadingHTTPServer((direccion, puerto), Manejador).serve_forever()

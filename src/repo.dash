@@ -95,6 +95,47 @@ func ref_escribir(nombre: String, id: String) -> Bool
     return file_write_text(ruta, id + "\n")
 end
 
+# Borra una referencia: el fichero suelto y su línea de packed-refs (con la "^" que la siga, si la tiene). false si
+# no se pudo borrar algo que estaba
+func ref_borrar(nombre: String) -> Bool
+    ok = true
+    ruta = git_dir + "/" + nombre
+    if file_exists(ruta)
+        if not file_delete(ruta)
+            ok = false
+        end
+    end
+    p = git_dir + "/packed-refs"
+    if file_exists(p)
+        t = file_read_text(p)
+        if t != nil
+            r = ""
+            quitada = false
+            saltar = false
+            for l in str_split(t, "\n")
+                if saltar and str_starts(l, "^")
+                    continue
+                end
+                saltar = false
+                if l.length > 41 and es_id(l[:40]) and l[40:] == " " + nombre
+                    quitada = true
+                    saltar = true
+                    continue
+                end
+                if l != ""
+                    r = r + l + "\n"
+                end
+            end
+            if quitada
+                if not file_write_text(p, r)
+                    ok = false
+                end
+            end
+        end
+    end
+    return ok
+end
+
 # La rama de HEAD ("refs/heads/main"), o "" si HEAD apunta a un commit suelto
 func head_rama() -> String
     t = file_read_text(git_dir + "/HEAD")

@@ -197,6 +197,95 @@ func ruta_amiga(r: String) -> String
     return ruta_unir(raiz, utf8_to_latin1(r))
 end
 
+# ---- nombres que no se pueden sacar en este disco ----
+
+var _max_nombre: Int = 0
+
+# El nombre más largo que admite el disco del repositorio: 30 (FFS, OFS) o más (se prueba una vez en .git)
+func nombre_max() -> Int
+    if _max_nombre == 0
+        _max_nombre = 30
+        prueba = "dashgit-prueba-de-nombres-largos.tmp"
+        if file_write_text(git_dir + "/" + prueba, "x")
+            var borrar: [String] = []
+            n = dir_read(git_dir)
+            i = 0
+            while i < n
+                nombre = dir_entry_name(i)
+                if nombre == prueba
+                    _max_nombre = 107
+                end
+                if str_starts(nombre, "dashgit-prueba-de")
+                    borrar.push(nombre)
+                end
+                i = i + 1
+            end
+            for b in borrar
+                file_delete(git_dir + "/" + b)
+            end
+        end
+    end
+    return _max_nombre
+end
+
+# Por qué una ruta de git no se puede escribir en el disco del Amiga; "" si se puede
+func ruta_imposible(ruta: String) -> String
+    l1 = utf8_to_latin1(ruta)
+    if latin1_to_utf8(l1) != ruta
+        return "tiene letras que no caben en Latin-1"
+    end
+    if str_contains(ruta, ":")
+        return "tiene \":\", que el Amiga no admite en un nombre"
+    end
+    for parte in str_split(l1, "/")
+        if parte.length > 30 and parte.length > nombre_max()
+            return "un nombre de más de " + str_from_int(nombre_max(), 10) + " letras, que el disco no admite"
+        end
+    end
+    return ""
+end
+
+# Las rutas de una lista que no pueden estar en el disco del Amiga, con el porqué: las de ruta_imposible, y las que
+# solo se diferencian en mayúsculas de otra que va antes (el disco no distingue; se queda la primera), también si
+# un cajón suyo choca así con un fichero
+func fuera_del_disco(l: [EntradaIndice]) -> {String: String}
+    var r: {String: String} = {}
+    var bajas: {String: String} = {}
+    for e in l
+        razon = ruta_imposible(e.ruta)
+        if razon != ""
+            r[e.ruta] = razon
+        else
+            b = str_lower(utf8_to_latin1(e.ruta))
+            otra = bajas.get(b, "")
+            if otra != "" and otra != e.ruta
+                r[e.ruta] = "solo cambia en mayúsculas de " + utf8_to_latin1(otra) + " (el disco no las distingue)"
+            elif otra == ""
+                bajas[b] = e.ruta
+            end
+        end
+    end
+    for e in l
+        if r.get(e.ruta, "") == ""
+            var partes: [String] = str_split(str_lower(utf8_to_latin1(e.ruta)), "/")
+            pre = ""
+            i = 0
+            while i < partes.length - 1
+                if pre != ""
+                    pre = pre + "/"
+                end
+                pre = pre + partes[i]
+                otra = bajas.get(pre, "")
+                if otra != ""
+                    r[e.ruta] = "su cajón choca con el fichero " + utf8_to_latin1(otra) + " (el disco no distingue mayúsculas)"
+                end
+                i = i + 1
+            end
+        end
+    end
+    return r
+end
+
 struct FicheroTrabajo
     ruta: String = ""     # de git (UTF-8, "/")
     tam: Int = 0
@@ -285,73 +374,355 @@ func trabajo_guardar(ruta: String, escribir: Bool) -> String
     return id
 end
 
-# ---- .gitignore (lo sencillo: nombres con comodines, "/" al final para cajones, "!" no se admite) ----
+# ---- .gitignore, como git ----
+# Las reglas de .git/info/exclude y de los .gitignore de cada cajón (los de un cajón valen para lo que tiene
+# debajo, con rutas relativas a él). Gana la última regla que encaja del .gitignore más hondo; después el de su
+# padre y así hasta la raíz; al final info/exclude. "!" vuelve a incluir, pero no lo que está en un cajón ignorado.
+# "*" y "?" no saltan "/", "**" sí ("**/x", "x/**", "a/**/b"), [abc] [a-z] [!a]; "\" toma el carácter tal cual.
+# Una regla con "/" al principio o en medio va contra la ruta desde su cajón; sin "/", contra el nombre.
 
-var _ignorar: [String] = []
+struct Regla
+    re: String = ""          # expresión regular; "" si se compara tal cual
+    literal: String = ""     # el nombre tal cual (re == "") o lo que va tras "*" (sufijo)
+    sufijo: Bool = false     # "*" + literal: basta con que el nombre acabe así
+    niega: Bool = false
+    solo_cajon: Bool = false
+    anclado: Bool = false
+end
+
+var _reglas: [Regla] = []
+var _fuente_desde: {String: Int} = {}    # "/cajón" (o "!exclude") -> primera regla
+var _fuente_hasta: {String: Int} = {}    # -> la siguiente a la última
+var _fuente_leida: {String: Int} = {}
+var _cajon_ignorado: {String: Int} = {}  # 1 ignorado, 2 no: lo ya mirado
 var _ignorar_leido: Bool = false
+var _ign_mayus: Bool = false
 
-func _leer_ignorar()
-    _ignorar_leido = true
-    for f in [ruta_unir(raiz, ".gitignore"), git_dir + "/info/exclude"]
-        if file_exists(f)
-            for linea in str_split(file_read_text(f), "\n")
-                l = str_trim(linea)
-                if l != "" and not str_starts(l, "#") and not str_starts(l, "!")
-                    _ignorar.push(l)
+func _es_alnum(c: Int) -> Bool
+    return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c >= 128
+end
+
+# Un carácter tal cual en una expresión regular
+func _re_literal(ch: String) -> String
+    c = str_code(ch, 0)
+    if _es_alnum(c) or c == 47
+        return ch
+    end
+    return "\\" + ch
+end
+
+# Dónde acaba la clase [...] que empieza en i; -1 si no se cierra (entonces "[" es tal cual)
+func _fin_clase(p: String, i: Int) -> Int
+    n = p.length
+    j = i + 1
+    if j < n and (str_code(p, j) == 33 or str_code(p, j) == 94)
+        j = j + 1
+    end
+    if j < n and str_code(p, j) == 93
+        j = j + 1
+    end
+    while j < n and str_code(p, j) != 93
+        if str_code(p, j) == 91 and j + 1 < n and str_code(p, j + 1) == 58
+            k = str_find_from(p, ":]", j + 2)
+            if k < 0
+                return -1
+            end
+            j = k + 1
+        elif str_code(p, j) == 92
+            j = j + 1
+        end
+        j = j + 1
+    end
+    if j >= n
+        return -1
+    end
+    return j
+end
+
+# Lo de dentro de [...] (sin los corchetes) a una clase de expresión regular
+func _clase(c: String) -> String
+    r = "["
+    i = 0
+    n = c.length
+    if n > 0 and (str_code(c, 0) == 33 or str_code(c, 0) == 94)
+        r = "[^/"
+        i = 1
+    end
+    while i < n
+        k = str_code(c, i)
+        if k == 91 and i + 1 < n and str_code(c, i + 1) == 58
+            f = str_find_from(c, ":]", i + 2)
+            nombre = c[i + 2:f]
+            if nombre == "alpha"
+                r = r + "a-zA-Z"
+            elif nombre == "digit"
+                r = r + "0-9"
+            elif nombre == "alnum"
+                r = r + "a-zA-Z0-9"
+            elif nombre == "upper"
+                r = r + "A-Z"
+            elif nombre == "lower"
+                r = r + "a-z"
+            elif nombre == "xdigit"
+                r = r + "0-9a-fA-F"
+            elif nombre == "space"
+                r = r + " \\t\\n\\r"
+            end
+            i = f + 2
+            continue
+        end
+        if k == 92 and i + 1 < n
+            i = i + 1
+            k = str_code(c, i)
+        elif k == 45
+            r = r + "-"
+            i = i + 1
+            continue
+        end
+        if _es_alnum(k)
+            r = r + c[i:i + 1]
+        else
+            r = r + "\\" + c[i:i + 1]
+        end
+        i = i + 1
+    end
+    return r + "]"
+end
+
+# Un comodín de .gitignore a expresión regular
+func _a_regex(p: String) -> String
+    r = ""
+    n = p.length
+    i = 0
+    while i < n
+        c = str_code(p, i)
+        if c == 42
+            j = i
+            while j < n and str_code(p, j) == 42
+                j = j + 1
+            end
+            if j - i >= 2
+                antes = i == 0 or str_code(p, i - 1) == 47
+                if antes and j < n and str_code(p, j) == 47
+                    # "**/" o "/**/": ningún cajón o varios
+                    r = r + "(?:.*/)?"
+                    i = j + 1
+                    continue
+                end
+                if antes and j == n
+                    r = r + ".*"
+                    i = j
+                    continue
+                end
+            end
+            r = r + "[^/]*"
+            i = j
+            continue
+        end
+        if c == 63
+            r = r + "[^/]"
+        elif c == 91
+            k = _fin_clase(p, i)
+            if k < 0
+                r = r + "\\["
+            else
+                r = r + _clase(p[i + 1:k])
+                i = k
+            end
+        elif c == 92
+            if i + 1 < n
+                i = i + 1
+                r = r + _re_literal(p[i:i + 1])
+            end
+        else
+            r = r + _re_literal(p[i:i + 1])
+        end
+        i = i + 1
+    end
+    return r
+end
+
+func _con_comodines(p: String) -> Bool
+    return str_contains(p, "*") or str_contains(p, "?") or str_contains(p, "[") or str_contains(p, "\\")
+end
+
+# Una línea de un .gitignore a regla; nil si no es regla
+func _regla(linea: String) -> Regla
+    l = linea
+    if str_ends(l, "\r")
+        l = l[:l.length - 1]
+    end
+    # los espacios del final no cuentan, salvo "\ "
+    while str_ends(l, " ") and not str_ends(l, "\\ ")
+        l = l[:l.length - 1]
+    end
+    if l == "" or str_starts(l, "#")
+        return nil
+    end
+    r = Regla()
+    if str_starts(l, "!")
+        r.niega = true
+        l = l[1:]
+    end
+    if str_ends(l, "/")
+        r.solo_cajon = true
+        l = l[:l.length - 1]
+    end
+    if l == ""
+        return nil
+    end
+    r.anclado = str_contains(l, "/")
+    if str_starts(l, "/")
+        l = l[1:]
+    end
+    if not _con_comodines(l)
+        r.literal = l
+    elif not r.anclado and str_starts(l, "*") and not _con_comodines(l[1:])
+        r.sufijo = true
+        r.literal = l[1:]
+    else
+        r.re = _a_regex(l)
+    end
+    if _ign_mayus
+        r.literal = str_lower(r.literal)
+    end
+    return r
+end
+
+# Lee las reglas de un fichero (si existe) como la fuente "clave"
+func _leer_fuente(clave: String, fichero: String)
+    _fuente_leida[clave] = 1
+    _fuente_desde[clave] = _reglas.length
+    if file_exists(fichero)
+        t = file_read_text(fichero)
+        if t != nil
+            # git los guarda en UTF-8; uno escrito en el Amiga puede venir en Latin-1
+            tr = texto_a_trozo(t)
+            if tr.n > 0 and utf8_check(tr.buf, 0, tr.n) >= 0
+                t = latin1_to_utf8(t)
+            end
+            trozo_libre(tr)
+            for linea in str_split(t, "\n")
+                r = _regla(linea)
+                if r != nil
+                    _reglas.push(r)
                 end
             end
         end
     end
+    _fuente_hasta[clave] = _reglas.length
 end
 
-func _comodin(p: String, s: String) -> Bool
-    # wildcard_match usa ~ para escapar; git no
-    return wildcard_match(str_replace(p, "~", "~~"), s, false)
+func _leer_ignorar()
+    _ignorar_leido = true
+    _ign_mayus = str_lower(config_leer("core.ignorecase")) == "true"
+    _leer_fuente("!exclude", git_dir + "/info/exclude")
 end
 
-# Si git ignora esta ruta (de git)
+func _encaja(r: Regla, rel: String, nombre: String, es_cajon: Bool) -> Bool
+    if r.solo_cajon and not es_cajon
+        return false
+    end
+    s = nombre
+    if r.anclado
+        s = rel
+    end
+    if r.re != ""
+        return regex_match(r.re, s, _ign_mayus)
+    end
+    if _ign_mayus
+        s = str_lower(s)
+    end
+    if r.sufijo
+        return str_ends(s, r.literal)
+    end
+    return s == r.literal
+end
+
+# 1 si las reglas de una fuente ignoran la ruta, 2 si la vuelven a incluir, 0 si no dicen nada
+func _fuente_decide(clave: String, rel: String, nombre: String, es_cajon: Bool) -> Int
+    desde = _fuente_desde.get(clave, 0)
+    j = _fuente_hasta.get(clave, 0) - 1
+    while j >= desde
+        r = _reglas[j]
+        if _encaja(r, rel, nombre, es_cajon)
+            if r.niega
+                return 2
+            end
+            return 1
+        end
+        j = j - 1
+    end
+    return 0
+end
+
+# Si las reglas ignoran esta ruta de "cuantas" partes (sin mirar los cajones de encima)
+func _ignorada_una(ruta: String, partes: [String], cuantas: Int, es_cajon: Bool) -> Bool
+    nombre = partes[cuantas - 1]
+    # los .gitignore de los cajones de encima, del más hondo a la raíz
+    k = cuantas - 1
+    while k >= 0
+        base = ""
+        q = 0
+        while q < k
+            if q > 0
+                base = base + "/"
+            end
+            base = base + partes[q]
+            q = q + 1
+        end
+        clave = "/" + base
+        if _fuente_leida.get(clave, 0) == 0
+            fichero = ruta_amiga(".gitignore")
+            if base != ""
+                fichero = ruta_amiga(base + "/.gitignore")
+            end
+            _leer_fuente(clave, fichero)
+        end
+        rel = ruta
+        if base != ""
+            rel = ruta[base.length + 1:]
+        end
+        d = _fuente_decide(clave, rel, nombre, es_cajon)
+        if d != 0
+            return d == 1
+        end
+        k = k - 1
+    end
+    return _fuente_decide("!exclude", ruta, nombre, es_cajon) == 1
+end
+
+# Si git ignora esta ruta (de git, de un fichero)
 func ignorada(ruta: String) -> Bool
     if not _ignorar_leido
         _leer_ignorar()
     end
     var partes: [String] = str_split(ruta, "/")
-    for p0 in _ignorar
-        p = p0
-        solo_cajon = str_ends(p, "/")
-        if solo_cajon
-            p = p[:p.length - 1]
+    n = partes.length
+    pre = ""
+    c = 1
+    while c <= n
+        if pre != ""
+            pre = pre + "/"
         end
-        anclado = str_contains(p, "/")
-        if str_starts(p, "/")
-            p = p[1:]
-        end
-        if anclado
-            # contra la ruta entera, o contra un cajón suyo
-            if _comodin(p, ruta) and not solo_cajon
+        pre = pre + partes[c - 1]
+        if c < n
+            # un cajón ignorado ignora todo lo de dentro (no se puede volver a incluir)
+            v = _cajon_ignorado.get(pre, 0)
+            if v == 0
+                v = 2
+                if _ignorada_una(pre, partes, c, true)
+                    v = 1
+                end
+                _cajon_ignorado[pre] = v
+            end
+            if v == 1
                 return true
             end
-            pre = ""
-            i = 0
-            while i < partes.length - 1
-                if pre != ""
-                    pre = pre + "/"
-                end
-                pre = pre + partes[i]
-                if _comodin(p, pre)
-                    return true
-                end
-                i = i + 1
-            end
         else
-            i = 0
-            while i < partes.length
-                es_cajon = i < partes.length - 1
-                if (es_cajon or not solo_cajon) and _comodin(p, partes[i])
-                    return true
-                end
-                i = i + 1
-            end
+            return _ignorada_una(pre, partes, c, false)
         end
+        c = c + 1
     end
     return false
 end

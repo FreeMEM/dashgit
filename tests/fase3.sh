@@ -34,12 +34,42 @@ open('docs/notas.txt','w').write('notas\n' * (10 + v))
   git tag -a v2 -m "etiqueta anotada" main~2
 )
 git clone -q --no-local "$tmp/origen" "$tmp/sys/P"
-(cd "$tmp/sys/P" && git branch -q otra origin/otra && git gc -q --aggressive && git config user.name Amiga && git config user.email a@a)
+(cd "$tmp/sys/P" && git branch -q otra origin/otra && git branch -q borrar origin/otra && git branch -q borrar2 main~1 && git gc -q --aggressive && git config user.name Amiga && git config user.email a@a)
+# borrar y borrar2 quedan en packed-refs; borrar2 además suelta (con otro commit), para branch -d
+(cd "$tmp/sys/P" && git update-ref refs/heads/borrar2 main~3 && grep -q " refs/heads/borrar$" .git/packed-refs && [ -f .git/refs/heads/borrar2 ])
 ls "$tmp/sys/P/.git/objects/pack/"*.pack >/dev/null
 # git deja los packs de solo lectura y FS-UAE no los abre así (abre en lectura y escritura); en un Amiga no pasa
 chmod -R u+w "$tmp/sys/P"
 # git deja los packs de solo lectura, y FS-UAE no los abre así (abre en lectura y escritura): en un Amiga no pasa
 chmod -R u+w "$tmp/sys/P"
+# una historia larga (6001 commits, más de los 5000 que miraba es_antepasado): la rama vieja es el primero
+mkdir -p "$tmp/sys/L"
+git -C "$tmp/sys/L" init -q -b main
+python3 - "$tmp/fi.txt" <<'PY'
+import sys
+with open(sys.argv[1], "w") as f:
+    f.write("blob\nmark :1\ndata 5\nhola\n")
+    for i in range(6001):
+        msg = "c%d\n" % i
+        f.write("commit refs/heads/main\ncommitter PC <p@p> %d +0000\ndata %d\n%s" % (1700000000 + i, len(msg), msg))
+        if i == 0:
+            f.write("M 100644 :1 f.txt\n")
+        f.write("\n")
+PY
+git -C "$tmp/sys/L" fast-import --quiet < "$tmp/fi.txt"
+git -C "$tmp/sys/L" branch vieja main~6000
+git -C "$tmp/sys/L" reset -q --hard main
+git -C "$tmp/sys/L" gc -q
+git -C "$tmp/sys/L" config user.name Amiga; git -C "$tmp/sys/L" config user.email a@a
+chmod -R u+w "$tmp/sys/L"
+# una cadena de 300 deltas (el máximo que admite dashgit, como el --depth de git)
+mkdir -p "$tmp/sys/H"
+git -C "$tmp/sys/H" init -q
+hondo=$(python3 "$aqui/tests/pack_hondo.py" "$tmp/sys/H/.git/objects/pack/pack-h.pack" 300)
+mv "$tmp/sys/H/.git/objects/pack/pack-h.pack.txt" "$tmp/hondo.txt"
+git -C "$tmp/sys/H" index-pack "$tmp/sys/H/.git/objects/pack/pack-h.pack" >/dev/null
+git -C "$tmp/sys/H" verify-pack -v "$tmp/sys/H/.git/objects/pack/pack-h.idx" | grep -q "= 300:"
+chmod -R u+w "$tmp/sys/H"
 sueltos=$(find "$tmp/sys/P/.git/objects" -path '*/pack' -prune -o -type f -print | grep -v info | wc -l)
 echo "objetos sueltos: $sueltos; con delta: $(cd "$tmp/sys/P" && git verify-pack -v .git/objects/pack/*.idx | awk 'NF==7' | wc -l)"
 # blobs con delta, para cat-file
@@ -49,6 +79,9 @@ r() { n=$((n+1)); printf 'dashgit %s >DH0:R/%02d.txt\n' "$1" $n; }
 {
   echo "MakeDir DH0:R"
   echo "CD DH0:P"
+  echo "dashgit branch -d borrar >DH0:R/bd1.txt"
+  echo "dashgit branch -d borrar2 >DH0:R/bd2.txt"
+  echo "dashgit branch -d borrar >DH0:R/bd3.txt"
   r "log --oneline"                       # 01
   r "status -s"                           # 02
   i=0; for b in $delta; do r "cat-file -p $b"; done   # 03..
@@ -66,6 +99,10 @@ base=$((2 + ncat))
   echo "dashgit branch de-tag v2 >DH0:R/tag_branch.txt"
   echo "dashgit checkout v2 >DH0:R/tag_checkout.txt"
   echo "dashgit status -s >DH0:R/tag_status.txt"
+  echo "CD DH0:H"
+  echo "dashgit cat-file -p $hondo >DH0:R/hondo.txt"
+  echo "CD DH0:L"
+  echo "dashgit merge vieja >DH0:R/largo_merge.txt"
 } >> "$tmp/sys/S/Startup-Extra"
 cd "$dash" && python3 tools/emu_run.py --timeout ${TIEMPO:-400} --system "$tmp/sys" --keep "$tmp/disco" "$tmp/sys/C/dashgit" >/dev/null 2>&1 || true
 d="$tmp/disco"
@@ -88,10 +125,17 @@ k=$((k+1)); grep -q "desde-el-amiga" "$d/R/$(printf %02d $k).txt" && bien "commi
 [ "$(git log --format=%s -1 otra)" = "desde-el-amiga" ] && bien "git ve el commit" || mal "git ve el commit"
 git fsck --strict 2>&1 | grep -iv "dangling\|colgando\|notice\|Checking\|Revisando\|actualizando" | head -5 || true
 [ -z "$(git status --porcelain)" ] && bien "git status limpio" || { mal "git status:"; git status --porcelain | head; }
+# branch -d de ramas en packed-refs (borrar2 también suelta)
+grep -q "Rama borrar borrada" "$d/R/bd1.txt" && grep -q "Rama borrar2 borrada" "$d/R/bd2.txt" && bien "branch -d" || { mal "branch -d:"; cat "$d/R/bd1.txt" "$d/R/bd2.txt"; }
+grep -q "no existe la rama borrar" "$d/R/bd3.txt" && bien "branch -d otra vez: no existe" || { mal "branch -d otra vez:"; cat "$d/R/bd3.txt"; }
+[ -z "$(git branch --list 'borrar*')" ] && ! grep -q "refs/heads/borrar" .git/packed-refs && [ ! -e .git/refs/heads/borrar2 ] && git show-ref --verify -q refs/tags/v2 && bien "fuera de packed-refs y lo demás sigue" || { mal "packed-refs:"; cat .git/packed-refs; git branch; }
 # etiqueta anotada (v2 apunta a un objeto tag, no a un commit)
 [ "$(iconv -f latin1 -t utf-8 "$d/R/tag_log.txt")" = "$(git log --oneline v2)" ] && bien "log de una etiqueta anotada" || { mal "log v2:"; cat "$d/R/tag_log.txt"; }
 [ "$(git rev-parse de-tag)" = "$(git rev-parse 'v2^{commit}')" ] && bien "branch desde una etiqueta anotada" || { mal "branch de-tag:"; cat "$d/R/tag_branch.txt"; git rev-parse de-tag; }
 grep -q "HEAD suelto" "$d/R/tag_checkout.txt" && [ "$(cat .git/HEAD)" = "$(git rev-parse 'v2^{commit}')" ] && bien "checkout de una etiqueta anotada" || { mal "checkout v2:"; cat "$d/R/tag_checkout.txt"; }
 [ -z "$(cat "$d/R/tag_status.txt")" ] && bien "limpio en la etiqueta" || { mal "status en v2:"; cat "$d/R/tag_status.txt"; }
+cmp -s "$d/R/hondo.txt" "$tmp/hondo.txt" && bien "cadena de 300 deltas" || { mal "cadena de 300 deltas:"; head -c 300 "$d/R/hondo.txt"; }
+# historia larga: vieja ya está en main
+grep -q "Ya está al día" <(iconv -f latin1 -t utf-8 "$d/R/largo_merge.txt") && [ "$(git -C "$d/L" rev-parse main)" = "$(git -C "$d/L" rev-parse main~0)" ] && [ "$(git -C "$d/L" log --format=%s -1 main)" = "c6000" ] && bien "merge en una historia de 6001 commits: al día" || { mal "historia larga:"; cat "$d/R/largo_merge.txt"; }
 [ $fallos -eq 0 ] && echo "TODO BIEN"
 exit 0

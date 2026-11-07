@@ -8,11 +8,27 @@ const CERO = "0000000000000000000000000000000000000000"
 
 # ---- credenciales ----
 
-# "Authorization: Basic ...\r\n" para un host, o "" si no hay credenciales
-func autorizacion(host: String) -> String
-    u = env_get("DASHGIT_USUARIO")
-    t = env_get("DASHGIT_TOKEN")
+# "Authorization: Basic ...\r\n" para una dirección, o "" si no hay credenciales para ella. Solo por https: por
+# http irían sin cifrar (salvo a 127.0.0.1, que no sale del ordenador; lo usan las pruebas). DASHGIT_TOKEN y
+# DASHGIT_USUARIO valen para el host de DASHGIT_HOST (para todos si no está); si no, el fichero de credenciales,
+# por host.
+func autorizacion(url: Url) -> String
+    if url == nil
+        return ""
+    end
+    if not url.https and url.host != "127.0.0.1"
+        return ""
+    end
+    host = str_lower(url.host)
+    u = ""
+    t = ""
+    h = str_lower(env_get("DASHGIT_HOST"))
+    if h == "" or h == host
+        u = env_get("DASHGIT_USUARIO")
+        t = env_get("DASHGIT_TOKEN")
+    end
     if t == ""
+        u = ""
         for f in ["ENV:dashgit/credenciales", "ENVARC:dashgit/credenciales"]
             if t == "" and file_exists(f)
                 # formato netrc: machine host login usuario password token
@@ -21,7 +37,7 @@ func autorizacion(host: String) -> String
                 i = 0
                 while i < p.length - 1
                     if p[i] == "machine"
-                        maquina = p[i + 1]
+                        maquina = str_lower(p[i + 1])
                     elif maquina == host and p[i] == "login"
                         u = p[i + 1]
                     elif maquina == host and p[i] == "password"
@@ -108,15 +124,17 @@ func descubrir(url: String, servicio: String) -> Remoto
         r.error = "solo se admiten direcciones http:// y https://"
         return r
     end
-    auth = autorizacion(u.host)
+    auth = autorizacion(u)
     resp = http_pedir("GET", url + "/info/refs?service=" + servicio, "", nil, auth)
     if resp.estado == 0
         r.error = resp.error
         return r
     end
     if resp.estado == 401 or resp.estado == 403
-        if auth == ""
-            r.error = "el servidor pide usuario y token (dashgit config --global, ver el LEEME)"
+        if auth == "" and not u.https
+            r.error = "el servidor pide usuario y token, y por http no se mandan (sin cifrar): usa https"
+        elif auth == ""
+            r.error = "el servidor pide usuario y token (DASHGIT_TOKEN, ver el README)"
         else
             r.error = "el servidor no acepta el usuario o el token"
         end
@@ -225,7 +243,7 @@ func traer_pack(r: Remoto, quiero: [String], tengo: [String]) -> String
     pet = pet + pkt("done\n")
     u = url_partir(r.url)
     cuerpo = texto_a_trozo(pet)
-    resp = http_pedir("POST", r.url + "/git-upload-pack", "application/x-git-upload-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-upload-pack-result\r\n")
+    resp = http_pedir("POST", r.url + "/git-upload-pack", "application/x-git-upload-pack-request", cuerpo, autorizacion(u) + "Accept: application/x-git-upload-pack-result\r\n")
     trozo_libre(cuerpo)
     if resp.estado != 200
         e = resp.error
@@ -425,32 +443,61 @@ end
 
 # ---- de quién viene qué ----
 
-# Si el commit "antiguo" está en la historia de "nuevo" (hasta 5000 commits atrás)
+# Si el commit "antiguo" está en la historia de "nuevo" (por anchura, sin tope)
 func es_antepasado(antiguo: String, nuevo: String) -> Bool
     if antiguo == "" or antiguo == nuevo
         return true
     end
     var cola: [String] = [nuevo]
     var vistos: {String: Int} = {}
-    mirados = 0
-    while cola.length > 0 and mirados < 5000
-        id = cola.pop()
-        if vistos.get(id, 0) == 0
-            vistos[id] = 1
-            mirados = mirados + 1
-            if id == antiguo
-                return true
-            end
-            o = objeto_leer(id)
-            if o != nil
-                for pp in commit_padres(o)
+    vistos[nuevo] = 1
+    i = 0
+    while i < cola.length
+        id = cola[i]
+        i = i + 1
+        o = objeto_leer(id)
+        if o != nil
+            for pp in commit_padres(o)
+                if pp == antiguo
+                    objeto_libre(o)
+                    return true
+                end
+                if vistos.get(pp, 0) == 0
+                    vistos[pp] = 1
                     cola.push(pp)
                 end
-                objeto_libre(o)
             end
+            objeto_libre(o)
         end
     end
     return false
+end
+
+# El commit al que lleva un id (una etiqueta anotada, al suyo); "" si no es un commit que tengamos
+func _a_commit(id: String) -> String
+    x = id
+    vueltas = 0
+    while vueltas < 10
+        o = objeto_leer(x)
+        if o == nil
+            return ""
+        end
+        t = o.tipo
+        siguiente = ""
+        if t == "tag"
+            siguiente = commit_campo(o, "object")
+        end
+        objeto_libre(o)
+        if t == "commit"
+            return x
+        end
+        if t != "tag"
+            return ""
+        end
+        x = siguiente
+        vueltas = vueltas + 1
+    end
+    return ""
 end
 
 func remoto_url(nombre: String) -> String
@@ -822,32 +869,59 @@ func orden_push(args: [String])
         aviso("el remoto tiene commits que tú no tienes; haz dashgit pull antes")
         return
     end
-    # los commits nuevos, de mio hacia atrás hasta suyo
-    var vistos: {String: Int} = {}
-    if suyo != ""
-        _marcar_arbol(commit_arbol(suyo), vistos)
-        vistos[suyo] = 1
-    end
-    var commits: [String] = []
-    var cola: [String] = [mio]
-    while cola.length > 0
-        id = cola.pop()
-        if vistos.get(id, 0) == 0 and not (suyo != "" and es_antepasado(id, suyo))
-            vistos[id] = 1
-            commits.push(id)
-            o = objeto_leer(id)
-            if o != nil
-                for pp in commit_padres(o)
-                    cola.push(pp)
-                end
-                objeto_libre(o)
+    # lo que el remoto ya tiene: los antepasados de todas sus ramas y etiquetas que tenemos aquí, en un solo
+    # recorrido (así una rama nueva no manda lo que ya está en otras)
+    var tiene: {String: Int} = {}
+    var puntas: [String] = []
+    for x in r.refs
+        if (str_starts(x.nombre, "refs/heads/") or str_starts(x.nombre, "refs/tags/")) and objeto_existe(x.id)
+            c = _a_commit(x.id)
+            if c != ""
+                puntas.push(c)
             end
         end
+    end
+    marcar_antepasados(puntas, tiene)
+    # los commits nuevos: de mio hacia atrás, sin entrar en lo que el remoto ya tiene
+    var vistos: {String: Int} = {}
+    var commits: [String] = []
+    var borde: [String] = []
+    var cola: [String] = [mio]
+    vistos[mio] = 1
+    i = 0
+    while i < cola.length
+        id = cola[i]
+        i = i + 1
+        if tiene.get(id, 0) != 0
+            borde.push(id)
+        else
+            commits.push(id)
+            o = objeto_leer(id)
+            if o == nil
+                aviso("falta el commit " + id)
+                return
+            end
+            for pp in commit_padres(o)
+                if vistos.get(pp, 0) == 0
+                    vistos[pp] = 1
+                    cola.push(pp)
+                end
+            end
+            objeto_libre(o)
+        end
+    end
+    # los árboles de los commits del remoto de los que salen los nuevos ya los tiene: lo que no cambia no se manda
+    var objs: {String: Int} = {}
+    if suyo != "" and tiene.get(suyo, 0) != 0
+        borde.push(suyo)
+    end
+    for b in borde
+        _marcar_arbol(commit_arbol(b), objs)
     end
     var ids: [String] = []
     for c in commits
         ids.push(c)
-        _nuevos_del_arbol(commit_arbol(c), vistos, ids)
+        _nuevos_del_arbol(commit_arbol(c), objs, ids)
     end
     pack = hacer_pack(ids)
     if pack == nil
@@ -876,7 +950,7 @@ func orden_push(args: [String])
     buffer_copy(cuerpo.buf, largo + 4, pack.buf, 0, pack.n)
     trozo_libre(pack)
     u = url_partir(url)
-    resp = http_pedir("POST", url + "/git-receive-pack", "application/x-git-receive-pack-request", cuerpo, autorizacion(u.host) + "Accept: application/x-git-receive-pack-result\r\n")
+    resp = http_pedir("POST", url + "/git-receive-pack", "application/x-git-receive-pack-request", cuerpo, autorizacion(u) + "Accept: application/x-git-receive-pack-result\r\n")
     trozo_libre(cuerpo)
     if resp.estado != 200
         e = resp.error

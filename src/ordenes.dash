@@ -143,10 +143,11 @@ func orden_add(args: [String])
                 end
             end
         end
-        # borrados del árbol de trabajo
+        # borrados del árbol de trabajo (lo que no puede estar en este disco no cuenta)
+        var fuera: {String: String} = fuera_del_disco(idx)
         i = idx.length - 1
         while i >= 0
-            if dentro_de(idx[i].ruta, c)
+            if dentro_de(idx[i].ruta, c) and fuera.get(idx[i].ruta, "") == ""
                 hallado = true
                 esta = false
                 for f in todos
@@ -357,10 +358,14 @@ func estado(corto: Bool) -> Estado
         i = i + 1
     end
     refrescar = false
+    # lo que no puede estar en este disco no se da por borrado
+    var fuera: {String: String} = fuera_del_disco(idx)
     for e in idx
         p = en_trabajo.get(e.ruta, 0)
         if p == 0
-            r.sin_preparar.push(_linea(corto, " D", "borrado:    ", e.ruta))
+            if fuera.get(e.ruta, "") == ""
+                r.sin_preparar.push(_linea(corto, " D", "borrado:    ", e.ruta))
+            end
         else
             f = todos[p - 1]
             if f.tam != e.tam
@@ -475,6 +480,23 @@ func orden_status(args: [String])
     end
 end
 
+# ---- check-ignore ----
+
+# Escribe las rutas que .gitignore ignora (las demás no); código 1 si no hay ninguna, como git
+func orden_check_ignore(args: [String])
+    hubo = false
+    for a in args
+        r = ruta_git(a)
+        if r != "?" and r != "" and ignorada(r)
+            Print a
+            hubo = true
+        end
+    end
+    if not hubo and codigo == 0
+        codigo = 1
+    end
+end
+
 # ---- commit ----
 
 func orden_commit(args: [String])
@@ -501,7 +523,7 @@ func orden_commit(args: [String])
     if file_exists(git_dir + "/MERGE_HEAD")
         fusion = str_trim(file_read_text(git_dir + "/MERGE_HEAD"))[:40]
         if mensaje == "" and file_exists(git_dir + "/MERGE_MSG")
-            mensaje = utf8_to_latin1(str_trim(file_read_text(git_dir + "/MERGE_MSG")))
+            mensaje = str_trim(file_read_text(git_dir + "/MERGE_MSG"))
         end
         var idc: [EntradaIndice] = indice_leer()
         for e in idc
@@ -555,7 +577,7 @@ func orden_commit(args: [String])
     if fusion != ""
         padres.push(fusion)
     end
-    id = commit_crear(arbol, padres, latin1_to_utf8(firma), latin1_to_utf8(mensaje))
+    id = commit_crear(arbol, padres, a_utf8(firma), a_utf8(mensaje))
     if id == ""
         aviso("no se pudo guardar el commit")
         return
@@ -595,11 +617,14 @@ func _add_seguidos(idx: [EntradaIndice]) -> Bool
         en_trabajo[todos[i].ruta] = i + 1
         i = i + 1
     end
+    var fuera: {String: String} = fuera_del_disco(idx)
     i = idx.length - 1
     while i >= 0
         p = en_trabajo.get(idx[i].ruta, 0)
         if p == 0
-            idx.remove(i)
+            if fuera.get(idx[i].ruta, "") == ""
+                idx.remove(i)
+            end
         else
             f = todos[p - 1]
             if f.tam != idx[i].tam or f.mtime != idx[i].mtime
@@ -649,14 +674,31 @@ func orden_log(args: [String])
         end
         return
     end
+    # todos los commits (de todos los padres), del más nuevo al más viejo por la fecha del committer, como git log:
+    # se saca siempre el pendiente más nuevo (a igual fecha, el que entró antes)
+    var pendientes: [String] = [id]
+    var fechas: [Int] = [_fecha_commit(id)]
+    var vistos_ids: {String: Int} = {}
+    vistos_ids[id] = 1
     vistos = 0
-    while id != "" and (max < 0 or vistos < max)
+    while pendientes.length > 0 and (max < 0 or vistos < max)
+        k = 0
+        q = 1
+        while q < pendientes.length
+            if fechas[q] > fechas[k]
+                k = q
+            end
+            q = q + 1
+        end
+        id = pendientes[k]
+        pendientes.remove(k)
+        fechas.remove(k)
         o = objeto_leer(id)
         if o == nil
             aviso("falta el commit " + id)
             return
         end
-        msg = utf8_to_latin1(commit_mensaje(o))
+        msg = a_latin1(commit_mensaje(o))
         if corto
             nl = str_find(msg, "\n")
             if nl >= 0
@@ -665,8 +707,16 @@ func orden_log(args: [String])
             Print id[:7] + " " + msg
         else
             Print "commit " + id
+            var ps0: [String] = commit_padres(o)
+            if ps0.length > 1
+                l = "Merge:"
+                for pp in ps0
+                    l = l + " " + pp[:7]
+                end
+                Print l
+            end
             autor = commit_campo(o, "author")
-            Print "Autor: " + utf8_to_latin1(firma_quien(autor))
+            Print "Autor: " + a_latin1(firma_quien(autor))
             Print "Fecha: " + firma_fecha(autor)
             Print ""
             for l in str_split(str_trim(msg), "\n")
@@ -676,12 +726,34 @@ func orden_log(args: [String])
         end
         var ps: [String] = commit_padres(o)
         objeto_libre(o)
-        id = ""
-        if ps.length > 0
-            id = ps[0]
+        for pp in ps
+            if vistos_ids.get(pp, 0) == 0
+                vistos_ids[pp] = 1
+                pendientes.push(pp)
+                fechas.push(_fecha_commit(pp))
+            end
         end
         vistos = vistos + 1
     end
+end
+
+# La fecha (segundos) del committer de un commit; 0 si no se puede leer
+func _fecha_commit(id: String) -> Int
+    o = objeto_leer(id)
+    if o == nil
+        return 0
+    end
+    f = commit_campo(o, "committer")
+    objeto_libre(o)
+    i = str_find(f, ">")
+    if i < 0
+        return 0
+    end
+    var p: [String] = str_split(str_trim(f[i + 1:]), " ")
+    if p.length < 1
+        return 0
+    end
+    return str_to_int(p[0], 10)
 end
 
 # ---- branch ----
@@ -755,7 +827,10 @@ func orden_branch(args: [String])
             aviso("no existe la rama " + n)
             return
         end
-        file_delete(git_dir + "/refs/heads/" + n)
+        if not ref_borrar("refs/heads/" + n)
+            aviso("no se pudo borrar del todo la rama " + n)
+            return
+        end
         Print "Rama " + n + " borrada (era " + id[:7] + ")"
         return
     end
@@ -825,9 +900,15 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         en_despues[despues[i].ruta] = i + 1
         i = i + 1
     end
+    # lo que no puede estar en este disco: se salta (sin pisar ni borrar nada) y se queda en el índice
+    var fuera: {String: String} = fuera_del_disco(despues)
+    var fuera_antes: {String: String} = fuera_del_disco(antes)
     # ¿se perdería algo?
     var mal: [String] = []
     for d in despues
+        if fuera.get(d.ruta, "") != ""
+            continue
+        end
         p = en_antes.get(d.ruta, 0)
         if (p == 0 or antes[p - 1].id != d.id) and tocados.get(d.ruta, 0) == 1
             mal.push(d.ruta)
@@ -860,7 +941,7 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
     end
     # quitar lo que ya no está (antes de escribir: un fichero "a" puede dejar sitio a un cajón "a/")
     for a in antes
-        if en_despues.get(a.ruta, 0) == 0
+        if en_despues.get(a.ruta, 0) == 0 and fuera_antes.get(a.ruta, "") == ""
             file_delete(ruta_amiga(a.ruta))
             _quitar_cajones_vacios(ruta_padre(ruta_amiga(a.ruta)))
         end
@@ -872,7 +953,15 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         p = en_antes.get(d.ruta, 0)
         cambia = p == 0 or antes[p - 1].id != d.id
         q = actual.get(d.ruta, 0)
-        if not cambia and mirar
+        razon = fuera.get(d.ruta, "")
+        if razon != ""
+            Print "dashgit: se salta " + utf8_to_latin1(d.ruta) + ": " + razon
+            x = EntradaIndice()
+            x.ruta = d.ruta
+            x.id = d.id
+            x.modo = d.modo
+            idx.push(x)
+        elif not cambia and mirar
             # igual en los dos commits: se queda lo que tenga el usuario (también si lo borró del disco)
             if q > 0
                 idx.push(idx_actual[q - 1])

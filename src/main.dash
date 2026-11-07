@@ -29,6 +29,7 @@ func uso()
     Print "  dashgit add (fichero | cajón | . | -A)..."
     Print "  dashgit rm [-r] [-f] [--cached] fichero..."
     Print "  dashgit status [-s]"
+    Print "  dashgit check-ignore ruta..."
     Print "  dashgit commit [-a] -m mensaje"
     Print "  dashgit log [--oneline] [-n N] [desde]"
     Print "  dashgit branch [-d] [rama [desde]]"
@@ -173,18 +174,20 @@ func orden_config(args: [String])
     if a.length == 1
         v = config_leer(a[0])
         if v != ""
-            Print v
+            Print a_latin1(v)
         end
         return
     end
+    # se guarda en UTF-8, como git (lo que se escribe en el Amiga viene en Latin-1)
+    valor = a_utf8(a[1])
     fichero = git_dir + "/config"
     if global
         crear_cajones("ENVARC:dashgit")
         crear_cajones("ENV:dashgit")
-        config_poner(a[0], a[1], "ENV:dashgit/config")
+        config_poner(a[0], valor, "ENV:dashgit/config")
         fichero = "ENVARC:dashgit/config"
     end
-    if not config_poner(a[0], a[1], fichero)
+    if not config_poner(a[0], valor, fichero)
         error("no se pudo escribir " + fichero)
     end
 end
@@ -217,7 +220,7 @@ Main
             orden_cat_file(args)
         elif orden == "config"
             orden_config(args)
-        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base"
+        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore"
             if necesita_repo()
                 if orden == "add"
                     orden_add(args)
@@ -237,6 +240,8 @@ Main
                     orden_merge(args)
                 elif orden == "merge-base"
                     orden_merge_base(args)
+                elif orden == "check-ignore"
+                    orden_check_ignore(args)
                 else
                     orden_checkout(args)
                 end
