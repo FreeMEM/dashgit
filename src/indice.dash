@@ -200,6 +200,7 @@ end
 # ---- nombres que no se pueden sacar en este disco ----
 
 var _max_nombre: Int = 0
+var _max_probado: Bool = false     # se pudo escribir la prueba (si no, un disco protegido: no se sabe)
 
 # El nombre más largo que admite el disco del repositorio: 30 (FFS, OFS) o más (se prueba una vez en .git)
 func nombre_max() -> Int
@@ -207,6 +208,7 @@ func nombre_max() -> Int
         _max_nombre = 30
         prueba = "dashgit-prueba-de-nombres-largos.tmp"
         if file_write_text(git_dir + "/" + prueba, "x")
+            _max_probado = true
             var borrar: [String] = []
             n = dir_read(git_dir)
             i = 0
@@ -226,6 +228,16 @@ func nombre_max() -> Int
         end
     end
     return _max_nombre
+end
+
+# git guarda cada objeto en un fichero de 38 letras (.git/objects/xx/...) y cada pack en uno de 50: en un disco que
+# no admite nombres tan largos (FFS u OFS sin nombres largos: 30 como mucho) no puede funcionar. Lo dice y da false
+func disco_para_git() -> Bool
+    if nombre_max() < 50 and _max_probado
+        error("este disco solo admite nombres de hasta " + str_from_int(nombre_max(), 10) + " letras y git necesita 50 (los ficheros de .git/objects). Usa un disco PFS3, SFS o FFS con nombres largos (DOS7)")
+        return false
+    end
+    return true
 end
 
 # Por qué una ruta de git no se puede escribir en el disco del Amiga; "" si se puede

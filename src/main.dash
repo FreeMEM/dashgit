@@ -45,7 +45,7 @@ end
 
 func necesita_repo() -> Bool
     if repo_buscar()
-        return true
+        return disco_para_git()
     end
     error("no hay un repositorio (.git) aquí ni más arriba")
     return false
@@ -62,6 +62,8 @@ func orden_init(args: [String])
     r = repo_crear(d)
     if r == ""
         error("no se pudo crear el repositorio en " + d)
+    elif not disco_para_git()
+        return
     elif r == "nuevo"
         Print "Repositorio vacío creado en " + git_dir
     else

@@ -542,6 +542,9 @@ func orden_clone(args: [String])
         aviso("no se pudo crear el repositorio en " + destino)
         return
     end
+    if not disco_para_git()
+        return
+    end
     config_poner("remote.origin.url", url, git_dir + "/config")
     config_poner("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*", git_dir + "/config")
     var quiero: [String] = []
