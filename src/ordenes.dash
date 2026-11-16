@@ -80,6 +80,8 @@ func orden_add(args: [String])
     for a in args
         if a == "-A" or a == "--all"
             cajones.push("")
+        elif a == "--"
+            # (como git: lo que sigue son rutas)
         else
             r = ruta_git(a)
             if r == "?"
