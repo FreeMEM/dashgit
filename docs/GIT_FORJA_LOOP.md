@@ -127,13 +127,22 @@ la memoria libre tras 200 y 400 pedidos.
     una vez por tiempo (tres emuladores a la vez y otras sesiones con los suyos) y pasó al repetirla sola. fase4 (red)
     no se ha pasado: no he cogido el cerrojo de red.
 
+- 2026-11-17, con la extensión Git de Forja (rama `git-ext` de Forja): el servidor se quedaba sin contestar un
+  pedido al azar (seguía vivo: contestaba por ARexx). Era una carrera: si el cliente estaba leyendo la respuesta de
+  antes justo cuando el servidor escribía la nueva, el fichero no se dejaba escribir y la respuesta se perdía; el
+  servidor ya daba ese pedido por hecho y no lo repetía. Ahora la respuesta se reintenta (hasta 1 s), el mismo número
+  otra vez vuelve a escribir su respuesta sin repetir la orden (el cliente reescribe su pedido si en 1,5 s no ve
+  respuesta), y un pedido leído a medias se vuelve a leer en la siguiente vuelta sin esperar otro aviso. Con eso,
+  `tests/git_panel.sh` de Forja pasa con el servidor todo el rato (A1200, REAL=1 y coffin).
+
 ## Falta
 
 - `status -b` no dice cuántos commits va por delante o por detrás del remoto (`[ahead 1]`).
 - `reset --hard`, `stash -u` (lo no seguido), `stash show`, `tag`, `remote`.
 - `show` de una fusión no enseña el diff combinado de git.
 - Servidor: un pedido largo (un `status` de un repositorio grande) no deja atender otro hasta que acaba; y si un
-  pedido se colgara, el servidor no contesta más (el cliente debe tener su tope de tiempo y arrancar otro).
+  pedido se colgara, el servidor no contesta más (la extensión de Forja lo da por perdido a los 20 s y sigue con
+  dashgit aparte). Pierde unos 40 bytes por pedido.
 - Lo que falta en Dash para el servidor: `cx_wait` no despierta con el puerto ARexx (`rexx_signal`), así que el
   servidor mira el puerto cada 200 ms (el canal de ficheros sí despierta enseguida). Meter un elemento en una lista
   cuesta mucho en un 68020: medido en el A1200 emulado, `push` de un texto 160 µs y de un número 40 µs (un
