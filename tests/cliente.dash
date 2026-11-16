@@ -1,0 +1,205 @@
+# Cliente de prueba de "dashgit servidor" (tests/servidor.sh): arranca el servidor, le manda órdenes por ARexx y por
+# ficheros, y escribe lo que contesta en DH0:R/ para compararlo con lo del Shell. También mide tiempos y memoria.
+
+const SERV = "DGP"
+var PEDIDO: String = "ENV:dashgit/DGP.pedido"
+var RESPUESTA: String = "ENV:dashgit/DGP.respuesta"
+const P = "DH0:P"
+
+var n_pedido: Int = 0
+var rc_ultimo: Int = 0
+var ms_ultimo: Int = 0
+var vigia: Int = 0
+var log: String = ""
+
+func anotar(t: String)
+    log = log + t + "\n"
+    file_write_text("DH0:R/cliente.log", log)
+end
+
+# Un pedido por ficheros: lo que escribe ("?" si no contesta en 30 s)
+func pedir(orden: String, cuerpo: String) -> String
+    n_pedido = n_pedido + 1
+    n = "#{n_pedido}"
+    t = n + "\n" + orden + "\n" + cuerpo
+    file_write_text(PEDIDO, t)
+    t0 = time_ms()
+    while time_ms() - t0 < 30000
+        r = file_read_text(RESPUESTA)
+        if r != nil and str_ends(r, "FIN " + n + "\n")
+            p = str_find(r, "\n")
+            cab = str_split(r[:p], " ")
+            if cab[0] == n
+                rc_ultimo = Int(cab[1])
+                ms_ultimo = Int(cab[2])
+                cuerpo_r = r[p + 1:r.length - ("FIN " + n + "\n").length]
+                return cuerpo_r
+            end
+        end
+        cx_wait(100)
+    end
+    anotar("sin respuesta: " + orden)
+    return "?"
+end
+
+func por_rexx(orden: String, cuerpo: String) -> String
+    m = orden
+    if cuerpo != ""
+        m = orden + "\n" + cuerpo
+    end
+    r = rexx_send(SERV, m)
+    rc_ultimo = rexx_rc()
+    return r
+end
+
+func guardar(nombre: String, t: String)
+    file_write_text("DH0:R/" + nombre, t)
+end
+
+func hay_puerto(p: String) -> Bool
+    n = ports_read()
+    i = 0
+    while i < n
+        if port_name(i) == p
+            return true
+        end
+        i = i + 1
+    end
+    return false
+end
+
+func esperar_puerto(p: String, si: Bool, ms: Int) -> Bool
+    t0 = time_ms()
+    while time_ms() - t0 < ms
+        if hay_puerto(p) == si
+            return true
+        end
+        time_delay(5)
+    end
+    return false
+end
+
+Main
+    rexx_port("CLIENTE")
+    dir_create("ENV:dashgit")
+    vigia = file_notify(RESPUESTA)
+    s = run_start("C:dashgit servidor dgp --dueno CLIENTE", 0)
+    if not esperar_puerto(SERV, true, 20000)
+        anotar("el servidor no arranca")
+        program_exit(10)
+    end
+    anotar("arrancado")
+    var ordenes: [String] = ["status --porcelain -b", "branch --show-current", "diff", "diff --rangos HEAD -- a.txt", "log --format=%H|%s", "diff --cached --name-status"]
+    i = 0
+    for o in ordenes
+        guardar("sf_#{i}.txt", pedir("-C " + P + " " + o, ""))
+        guardar("sa_#{i}.txt", por_rexx("-C " + P + " " + o, ""))
+        i = i + 1
+    end
+    # add y reset por el servidor
+    pedir("-C " + P + " add a.txt", "")
+    guardar("sf_add.txt", pedir("-C " + P + " status --porcelain", ""))
+    por_rexx("-C " + P + " reset -q -- a.txt", "")
+    guardar("sa_reset.txt", por_rexx("-C " + P + " status --porcelain", ""))
+    # --texto: lo que hay en el editor sin guardar
+    t = file_read_text("DH0:V/editor.txt")
+    guardar("sf_texto.txt", pedir("-C " + P + " diff --rangos --texto - -- a.txt", t))
+    guardar("sa_texto.txt", por_rexx("-C " + P + " diff --rangos HEAD --texto - -- a.txt", t))
+    guardar("sf_texto_sinsalto.txt", pedir("-C " + P + " diff --rangos --texto - -- a.txt", file_read_text("DH0:V/sinsalto.txt")))
+    guardar("sf_texto_nuevo.txt", pedir("-C " + P + " diff --rangos --texto - -- nuevo.txt", "uno\ndos\n"))
+    guardar("sf_texto_vacio.txt", pedir("-C DH0:Q diff --rangos HEAD --texto - -- q.txt", "q\n"))
+    # errores: una orden que no va en el servidor, un cajón que no existe
+    guardar("sf_push.txt", pedir("-C " + P + " push", "") + "rc #{rc_ultimo}\n")
+    guardar("sf_cajon.txt", pedir("-C DH0:NoHay status", "") + "rc #{rc_ultimo}\n")
+    por_rexx("-C " + P + " push", "")
+    guardar("sa_push.txt", "rc #{rc_ultimo}\n")
+    # tiempos: 10 de cada, por el servidor y por el Shell
+    tiempos = ""
+    for o in ["status --porcelain -b", "diff --rangos HEAD -- grande.txt"]
+        t0 = time_ms()
+        k = 0
+        while k < 10
+            pedir("-C " + P + " " + o, "")
+            k = k + 1
+        end
+        ms_s = (time_ms() - t0) / 10
+        dentro = ms_ultimo
+        t0 = time_ms()
+        k = 0
+        while k < 10
+            run_capture("C:dashgit -C " + P + " " + o, 60000)
+            k = k + 1
+        end
+        ms_c = (time_ms() - t0) / 10
+        tiempos = tiempos + o + ": servidor #{ms_s} ms (dentro #{dentro}), Shell #{ms_c} ms\n"
+    end
+    g = file_read_text("DH0:V/grande2.txt")
+    t0 = time_ms()
+    k = 0
+    while k < 10
+        pedir("-C " + P + " diff --rangos --texto - -- grande.txt", g)
+        k = k + 1
+    end
+    tiempos = tiempos + "rangos --texto de grande.txt (500 líneas, 3 trozos): servidor #{(time_ms() - t0) / 10} ms (dentro #{ms_ultimo})\n"
+    guardar("sf_grande.txt", pedir("-C " + P + " diff --rangos --texto - -- grande.txt", g))
+    guardar("tiempos.txt", tiempos)
+    # memoria: 200 pedidos (la mitad con texto)
+    m0 = Int(str_trim(pedir("MEMORIA", "")))
+    k = 0
+    while k < 100
+        pedir("-C " + P + " status --porcelain -b", "")
+        pedir("-C " + P + " diff --rangos --texto - -- grande.txt", g)
+        k = k + 1
+    end
+    m1 = Int(str_trim(pedir("MEMORIA", "")))
+    k = 0
+    while k < 100
+        pedir("-C " + P + " status --porcelain -b", "")
+        pedir("-C " + P + " diff --rangos --texto - -- grande.txt", g)
+        k = k + 1
+    end
+    m2 = Int(str_trim(pedir("MEMORIA", "")))
+    guardar("memoria.txt", "#{m0} #{m1} #{m2}\n")
+    # el mismo número otra vez no se repite (no contesta: la respuesta sigue siendo la de antes)
+    # ADIOS
+    pedir("ADIOS", "")
+    guardar("adios.txt", "#{esperar_puerto(SERV, false, 5000)}\n")
+    run_finish(s)
+    # sin dueño: acaba solo
+    s2 = run_start("C:dashgit servidor DGQ --dueno NADIE", 0)
+    arranca = esperar_puerto("DGQ", true, 10000)
+    se_va = esperar_puerto("DGQ", false, 6000)
+    guardar("dueno.txt", "#{arranca} #{se_va}\n")
+    run_finish(s2)
+    # dos con el mismo nombre
+    s3 = run_start("C:dashgit servidor DGR --dueno CLIENTE", 0)
+    esperar_puerto("DGR", true, 10000)
+    guardar("doble.txt", run_capture("C:dashgit servidor DGR", 20000) + "rc #{run_rc()}\n")
+    rexx_send("DGR", "ADIOS")
+    run_finish(s3)
+    # como lo arranca Forja: el cliente a prioridad -1, el nombre con punto, -C con comillas y un cajón de dentro, y el
+    # primer pedido en cuanto sale el puerto
+    task_priority(-1)
+    PEDIDO = "ENV:dashgit/FORJADASHGIT.1.pedido"
+    RESPUESTA = "ENV:dashgit/FORJADASHGIT.1.respuesta"
+    n_pedido = 0
+    s4 = run_start("C:dashgit servidor FORJADASHGIT.1 --dueno CLIENTE", 0)
+    esperar_puerto("FORJADASHGIT.1", true, 10000)
+    guardar("forja_status.txt", pedir("-C \"DH0:Prueba/juego\" status --porcelain -b", ""))
+    pedir("ADIOS", "")
+    guardar("forja_adios.txt", "#{esperar_puerto("FORJADASHGIT.1", false, 5000)}\n")
+    run_finish(s4)
+    # Ctrl-C lo acaba (también justo tras un pedido)
+    s5 = run_start("C:dashgit servidor FORJADASHGIT.1 --dueno CLIENTE", 0)
+    esperar_puerto("FORJADASHGIT.1", true, 10000)
+    n_pedido = n_pedido + 1
+    file_write_text(PEDIDO, "#{n_pedido}\n-C \"DH0:Prueba/juego\" status --porcelain -b\n")
+    t0 = time_ms()
+    run_break(s5)
+    while not run_ready(s5) and time_ms() - t0 < 20000
+        time_delay(5)
+    end
+    guardar("ctrlc.txt", "#{run_ready(s5)} #{(time_ms() - t0) / 1000}\n")
+    run_finish(s5)
+    anotar("hecho")
+end

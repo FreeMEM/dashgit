@@ -13,38 +13,40 @@ const VERSION = "0.2 alfa"
 
 func error(msg: String)
     codigo = 10
-    Print "dashgit: " + msg
+    sal("dashgit: " + msg)
 end
 
 func uso()
-    Print "dashgit " + VERSION + " - git para AmigaOS"
-    Print "Versión alfa: aún hay mucho que probar. Ten copia de lo importante."
-    Print ""
-    Print "  dashgit [-C cajón] orden [argumentos]"
-    Print ""
-    Print "  dashgit init [cajón]"
-    Print "  dashgit hash-object [-w] [-t tipo] fichero"
-    Print "  dashgit cat-file (-t | -s | -p | tipo) objeto"
-    Print "  dashgit config [--global] clave [valor]"
-    Print "  dashgit add (fichero | cajón | . | -A)..."
-    Print "  dashgit rm [-r] [-f] [--cached] fichero..."
-    Print "  dashgit status [-s | --porcelain] [-b]"
-    Print "  dashgit check-ignore ruta..."
-    Print "  dashgit commit [-a] [--amend] -m mensaje"
-    Print "  dashgit log [--oneline | --format=...] [-n N] [desde] [-- ruta...]"
-    Print "  dashgit show [--format=...] [--name-status] [commit | commit:ruta]"
-    Print "  dashgit branch [-d] [rama [desde]] | --show-current"
-    Print "  dashgit checkout (rama | -b rama | -- fichero...)"
-    Print "  dashgit diff [--cached] [commit [commit]] [--name-status | --numstat | --rangos | -U n] [-- fichero...]"
-    Print "  dashgit reset [--soft] [commit] [-- fichero...]"
-    Print "  dashgit restore [--staged] fichero..."
-    Print "  dashgit stash [push [-m mensaje] | list | apply | pop | drop] [stash@{n}]"
-    Print "  dashgit merge (rama | --abort)"
-    Print "  dashgit merge-base commit commit"
-    Print "  dashgit clone url [cajón]"
-    Print "  dashgit fetch [remoto]"
-    Print "  dashgit pull [remoto]                (fusiona si hace falta)"
-    Print "  dashgit push [remoto [rama]]"
+    sal("dashgit " + VERSION + " - git para AmigaOS")
+    sal("Versión alfa: aún hay mucho que probar. Ten copia de lo importante.")
+    sal("")
+    sal("  dashgit [-C cajón] orden [argumentos]")
+    sal("")
+    sal("  dashgit init [cajón]")
+    sal("  dashgit hash-object [-w] [-t tipo] fichero")
+    sal("  dashgit cat-file (-t | -s | -p | tipo) objeto")
+    sal("  dashgit config [--global] clave [valor]")
+    sal("  dashgit add (fichero | cajón | . | -A)...")
+    sal("  dashgit rm [-r] [-f] [--cached] fichero...")
+    sal("  dashgit status [-s | --porcelain] [-b]")
+    sal("  dashgit check-ignore ruta...")
+    sal("  dashgit commit [-a] [--amend] -m mensaje")
+    sal("  dashgit log [--oneline | --format=...] [-n N] [desde] [-- ruta...]")
+    sal("  dashgit show [--format=...] [--name-status] [commit | commit:ruta]")
+    sal("  dashgit branch [-d] [rama [desde]] | --show-current")
+    sal("  dashgit checkout (rama | -b rama | -- fichero...)")
+    sal("  dashgit diff [--cached] [commit [commit]] [--name-status | --numstat | --rangos | -U n] [-- fichero...]")
+    sal("  dashgit diff --rangos [commit] --texto fichero -- ruta")
+    sal("  dashgit reset [--soft] [commit] [-- fichero...]")
+    sal("  dashgit restore [--staged] fichero...")
+    sal("  dashgit stash [push [-m mensaje] | list | apply | pop | drop] [stash@{n}]")
+    sal("  dashgit merge (rama | --abort)")
+    sal("  dashgit merge-base commit commit")
+    sal("  dashgit clone url [cajón]")
+    sal("  dashgit fetch [remoto]")
+    sal("  dashgit pull [remoto]                (fusiona si hace falta)")
+    sal("  dashgit push [remoto [rama]]")
+    sal("  dashgit servidor [NOMBRE] [--dueno PUERTO]   (se queda abierto: órdenes por ARexx o ENV:dashgit)")
 end
 
 func necesita_repo() -> Bool
@@ -69,9 +71,9 @@ func orden_init(args: [String])
     elif not disco_para_git()
         return
     elif r == "nuevo"
-        Print "Repositorio vacío creado en " + git_dir
+        sal("Repositorio vacío creado en " + git_dir)
     else
-        Print "Repositorio de " + git_dir + " creado otra vez"
+        sal("Repositorio de " + git_dir + " creado otra vez")
     end
 end
 
@@ -112,7 +114,7 @@ func orden_hash_object(args: [String])
         error("no se pudo guardar el objeto")
         return
     end
-    Print id
+    sal(id)
 end
 
 # ---- cat-file ----
@@ -145,16 +147,16 @@ func orden_cat_file(args: [String])
         return
     end
     if que == "-t"
-        Print o.tipo
+        sal(o.tipo)
     elif que == "-s"
-        Print o.n
+        sal("#{o.n}")
     elif que == "-p" and o.tipo == "tree"
         for e in arbol_leer(o)
-            Print _rellenar_modo(e.modo) + " " + modo_tipo(e.modo) + " " + e.id + "\t" + utf8_to_latin1(e.nombre)
+            sal(_rellenar_modo(e.modo) + " " + modo_tipo(e.modo) + " " + e.id + "\t" + utf8_to_latin1(e.nombre))
         end
     elif que == "-p" or que == o.tipo
         if o.n > 0
-            console_write(str_from_buffer(o.datos, 0, o.n))
+            sal_crudo(str_from_buffer(o.datos, 0, o.n))
         end
     else
         error("el objeto " + id + " es de tipo " + o.tipo)
@@ -180,7 +182,7 @@ func orden_config(args: [String])
     if a.length == 1
         v = config_leer(a[0])
         if v != ""
-            Print a_latin1(v)
+            sal(a_latin1(v))
         end
         return
     end
@@ -196,6 +198,345 @@ func orden_config(args: [String])
     if not config_poner(a[0], valor, fichero)
         error("no se pudo escribir " + fichero)
     end
+end
+
+# ---- el reparto de las órdenes (lo usan Main y el servidor) ----
+
+func ejecutar(orden: String, args: [String])
+    if orden == "init"
+        orden_init(args)
+    elif orden == "hash-object"
+        orden_hash_object(args)
+    elif orden == "cat-file"
+        orden_cat_file(args)
+    elif orden == "config"
+        orden_config(args)
+    elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore" or orden == "show" or orden == "reset" or orden == "restore" or orden == "stash"
+        if necesita_repo()
+            if orden == "add"
+                orden_add(args)
+            elif orden == "rm"
+                orden_rm(args)
+            elif orden == "status"
+                orden_status(args)
+            elif orden == "commit"
+                orden_commit(args)
+            elif orden == "log"
+                orden_log(args)
+            elif orden == "branch"
+                orden_branch(args)
+            elif orden == "diff"
+                orden_diff(args)
+            elif orden == "merge"
+                orden_merge(args)
+            elif orden == "merge-base"
+                orden_merge_base(args)
+            elif orden == "check-ignore"
+                orden_check_ignore(args)
+            elif orden == "show"
+                orden_show(args)
+            elif orden == "reset"
+                orden_reset(args)
+            elif orden == "restore"
+                orden_restore(args)
+            elif orden == "stash"
+                orden_stash(args)
+            else
+                orden_checkout(args)
+            end
+        end
+    elif orden == "clone"
+        orden_clone(args)
+    elif orden == "fetch" or orden == "pull" or orden == "push"
+        if necesita_repo()
+            if orden == "fetch"
+                orden_fetch(args)
+            elif orden == "pull"
+                orden_pull(args)
+            else
+                orden_push(args)
+            end
+        end
+    elif orden == "version" or orden == "--version"
+        sal("dashgit " + VERSION)
+    else
+        error("orden desconocida: " + orden)
+        uso()
+    end
+end
+
+# ---- servidor: dashgit se queda abierto y contesta órdenes sin el coste de arrancar ----
+#
+#   dashgit servidor [NOMBRE] [--dueno PUERTO]
+#
+# Puerto ARexx NOMBRE (DASHGIT por defecto): cada orden es una línea de dashgit como en el Shell ("-C Work:x status
+# --porcelain -b"), y tras un salto de línea, si hace falta, un cuerpo (el texto de --texto -). RC el de la orden y,
+# con 0, RESULT lo que escribe. ADIOS acaba; VERSION; MEMORIA da la memoria libre.
+# Por ficheros (no deja esperando a nadie): ENV:dashgit/NOMBRE.pedido, con "n" (un número), la orden y el cuerpo,
+# una cosa por línea; la respuesta en ENV:dashgit/NOMBRE.respuesta: "n rc ms", lo que escribe y "FIN n". El mismo n
+# otra vez no repite la orden: escribe otra vez su respuesta (el cliente lo hace si no la ve: el aviso o la escritura
+# se pueden perder si coinciden con una lectura).
+# Con --dueno, acaba cuando ese puerto deja de existir (se mira cada 2 s). Ctrl-C también lo acaba.
+
+const SERVIDOR_NO = "|clone|fetch|pull|push|servidor|"
+var serv_cajon: String = ""
+var serv_raiz: String = ""
+var serv_packs: Int = -1
+var serv_adios: Bool = false
+
+# Una línea de órdenes en palabras, como el Shell: "entre comillas" con *" y ** dentro
+func partir_orden(l: String) -> [String]
+    var r: [String] = []
+    i = 0
+    n = l.length
+    while i < n
+        while i < n and (str_code(l, i) == 32 or str_code(l, i) == 9)
+            i = i + 1
+        end
+        if i >= n
+            break
+        end
+        if str_code(l, i) == 34
+            i = i + 1
+            p = ""
+            while i < n and str_code(l, i) != 34
+                if str_code(l, i) == 42 and i + 1 < n
+                    i = i + 1
+                    c = l[i:i + 1]
+                    if c == "n" or c == "N"
+                        c = "\n"
+                    elif c == "e" or c == "E"
+                        c = str_char(27)
+                    end
+                    p = p + c
+                else
+                    p = p + l[i:i + 1]
+                end
+                i = i + 1
+            end
+            i = i + 1
+            r.push(p)
+        else
+            j = i
+            while j < n and str_code(l, j) != 32 and str_code(l, j) != 9
+                j = j + 1
+            end
+            r.push(l[i:j])
+            i = j
+        end
+    end
+    return r
+end
+
+func _cuantos_packs() -> Int
+    if git_dir == ""
+        return -1
+    end
+    n = dir_read(git_dir + "/objects/pack")
+    c = 0
+    i = 0
+    while i < n
+        if str_ends(dir_entry_name(i), ".idx")
+            c = c + 1
+        end
+        i = i + 1
+    end
+    return c
+end
+
+# Una orden del servidor: su RC; lo que escribe, en sal_texto
+func servir(linea: String, cuerpo: String) -> Int
+    codigo = 0
+    diff_modo = D_PARCHE
+    contexto = 3
+    log_corto = false
+    log_formato = ""
+    log_con_formato = false
+    diff_texto = ""
+    diff_cuerpo = cuerpo
+    ignorar_olvidar()
+    capturar = true
+    sal_texto = ""
+    dir_change(serv_cajon)
+    var a: [String] = partir_orden(linea)
+    p = 0
+    while p + 1 < a.length and a[p] == "-C"
+        if not dir_change(a[p + 1])
+            error("no existe el cajón " + a[p + 1])
+            dir_change(serv_cajon)
+            capturar = false
+            return codigo
+        end
+        p = p + 2
+    end
+    if p >= a.length
+        error("falta la orden")
+    else
+        orden = a[p]
+        var args: [String] = []
+        i = p + 1
+        while i < a.length
+            args.push(a[i])
+            i = i + 1
+        end
+        if orden == "ADIOS"
+            serv_adios = true
+        elif orden == "VERSION"
+            sal("dashgit " + VERSION)
+        elif orden == "MEMORIA"
+            sal("#{mem_total()}")
+        elif str_contains(SERVIDOR_NO, "|" + orden + "|")
+            error("en el servidor no: usa dashgit aparte (" + orden + ")")
+        else
+            # las cachés del repositorio, si es otro o tiene packs nuevos
+            if repo_buscar()
+                np = _cuantos_packs()
+                if raiz != serv_raiz or np != serv_packs
+                    packs_olvidar()
+                    serv_raiz = raiz
+                    serv_packs = np
+                end
+            end
+            ejecutar(orden, args)
+        end
+    end
+    dir_change(serv_cajon)
+    capturar = false
+    return codigo
+end
+
+# Escribe la respuesta; si el cliente la está leyendo justo entonces, el fichero no se deja escribir: se prueba otra
+# vez (hasta 1 s)
+func _escribir_respuesta(f: String, t: String)
+    k = 0
+    while k < 50 and not file_write_text(f, t)
+        time_delay(1)
+        k = k + 1
+    end
+end
+
+func _dueno_vive(p: String) -> Bool
+    n = ports_read()
+    i = 0
+    while i < n
+        if port_name(i) == p
+            return true
+        end
+        i = i + 1
+    end
+    return false
+end
+
+func orden_servidor(args: [String])
+    nombre = "DASHGIT"
+    dueno = ""
+    i = 0
+    while i < args.length
+        if args[i] == "--dueno" and i + 1 < args.length
+            dueno = args[i + 1]
+            i = i + 1
+        else
+            nombre = args[i]
+        end
+        i = i + 1
+    end
+    nombre = str_upper(nombre)
+    if _dueno_vive(nombre)
+        error("ya hay un servidor " + nombre)
+        return
+    end
+    serv_cajon = dir_current()
+    crear_cajones("ENV:dashgit")
+    f_pedido = "ENV:dashgit/" + nombre + ".pedido"
+    f_respuesta = "ENV:dashgit/" + nombre + ".respuesta"
+    # lo de otra vez se borra antes de vigilar, y el puerto se abre lo último: quien espera a que salga el puerto
+    # para mandar su primer pedido no lo pierde
+    file_delete(f_pedido)
+    file_delete(f_respuesta)
+    vigia = file_notify(f_pedido)
+    if not rexx_port(nombre)
+        error("ya hay un servidor " + nombre)
+        if vigia != 0
+            file_notify_end(vigia)
+        end
+        return
+    end
+    task_priority(-1)
+    ultimo = ""
+    respuesta = ""
+    mirado = time_ms()
+    a_medias = false
+    while not serv_adios
+        r = cx_wait(200)
+        if r == -1
+            break
+        end
+        if vigia == 0 or file_changed(vigia) or a_medias
+            # (el aviso puede llegar al crear el fichero, antes de que esté escrito: entonces se mira otra vez en la
+            # siguiente vuelta, sin esperar a otro aviso, que se puede perder)
+            t = file_read_text(f_pedido)
+            a_medias = t == nil or t == "" or not str_contains(t, "\n")
+            if not a_medias
+                ls = str_find(t, "\n")
+                n = t
+                resto = ""
+                if ls >= 0
+                    n = t[:ls]
+                    resto = t[ls + 1:]
+                end
+                n = str_trim(n)
+                if n != "" and n == ultimo and respuesta != ""
+                    # el mismo pedido otra vez: el cliente no vio la respuesta (o no se pudo escribir): otra vez,
+                    # sin repetir la orden
+                    _escribir_respuesta(f_respuesta, respuesta)
+                elif n != "" and n != ultimo
+                    ultimo = n
+                    p2 = str_find(resto, "\n")
+                    linea = resto
+                    cuerpo = ""
+                    if p2 >= 0
+                        linea = resto[:p2]
+                        cuerpo = resto[p2 + 1:]
+                    end
+                    t0 = time_ms()
+                    rc = servir(str_trim(linea), cuerpo)
+                    ms = time_ms() - t0
+                    if sal_texto != "" and not str_ends(sal_texto, "\n")
+                        sal_texto = sal_texto + "\n"
+                    end
+                    respuesta = n + " #{rc} #{ms}\n" + sal_texto + "FIN " + n + "\n"
+                    _escribir_respuesta(f_respuesta, respuesta)
+                    sal_texto = ""
+                end
+            end
+        end
+        m = rexx_get()
+        while m != "" and not serv_adios
+            p3 = str_find(m, "\n")
+            linea = m
+            cuerpo = ""
+            if p3 >= 0
+                linea = m[:p3]
+                cuerpo = m[p3 + 1:]
+            end
+            rc = servir(str_trim(linea), cuerpo)
+            rexx_reply(rc, sal_texto)
+            sal_texto = ""
+            if not serv_adios
+                m = rexx_get()
+            end
+        end
+        if dueno != "" and time_ms() - mirado >= 2000
+            mirado = time_ms()
+            if not _dueno_vive(dueno)
+                break
+            end
+        end
+    end
+    if vigia != 0
+        file_notify_end(vigia)
+    end
+    file_delete(f_pedido)
 end
 
 Main
@@ -218,65 +559,10 @@ Main
             args.push(arg(i))
             i = i + 1
         end
-        if orden == "init"
-            orden_init(args)
-        elif orden == "hash-object"
-            orden_hash_object(args)
-        elif orden == "cat-file"
-            orden_cat_file(args)
-        elif orden == "config"
-            orden_config(args)
-        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore" or orden == "show" or orden == "reset" or orden == "restore" or orden == "stash"
-            if necesita_repo()
-                if orden == "add"
-                    orden_add(args)
-                elif orden == "rm"
-                    orden_rm(args)
-                elif orden == "status"
-                    orden_status(args)
-                elif orden == "commit"
-                    orden_commit(args)
-                elif orden == "log"
-                    orden_log(args)
-                elif orden == "branch"
-                    orden_branch(args)
-                elif orden == "diff"
-                    orden_diff(args)
-                elif orden == "merge"
-                    orden_merge(args)
-                elif orden == "merge-base"
-                    orden_merge_base(args)
-                elif orden == "check-ignore"
-                    orden_check_ignore(args)
-                elif orden == "show"
-                    orden_show(args)
-                elif orden == "reset"
-                    orden_reset(args)
-                elif orden == "restore"
-                    orden_restore(args)
-                elif orden == "stash"
-                    orden_stash(args)
-                else
-                    orden_checkout(args)
-                end
-            end
-        elif orden == "clone"
-            orden_clone(args)
-        elif orden == "fetch" or orden == "pull" or orden == "push"
-            if necesita_repo()
-                if orden == "fetch"
-                    orden_fetch(args)
-                elif orden == "pull"
-                    orden_pull(args)
-                else
-                    orden_push(args)
-                end
-            end
-        elif orden == "version" or orden == "--version"
-            Print "dashgit " + VERSION
+        if orden == "servidor"
+            orden_servidor(args)
         else
-            error("orden desconocida: " + orden)
-            uso()
+            ejecutar(orden, args)
         end
     end
     if codigo != 0

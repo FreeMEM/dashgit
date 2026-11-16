@@ -215,7 +215,7 @@ func http_pedir(metodo: String, url: String, tipo: String, cuerpo: Trozo, extra:
         r.estado = Int(p[1])
     end
     if http_traza
-        Print "HTTP " + metodo + " " + url + " -> " + primera
+        sal("HTTP " + metodo + " " + url + " -> " + primera)
     end
     ini = fin + 4
     r.cuerpo = Trozo()
