@@ -273,7 +273,9 @@ end
 # --porcelain -b"), y tras un salto de línea, si hace falta, un cuerpo (el texto de --texto -). RC el de la orden y,
 # con 0, RESULT lo que escribe. ADIOS acaba; VERSION; MEMORIA da la memoria libre.
 # Por ficheros (no deja esperando a nadie): ENV:dashgit/NOMBRE.pedido, con "n" (un número), la orden y el cuerpo,
-# una cosa por línea; la respuesta en ENV:dashgit/NOMBRE.respuesta: "n rc ms", lo que escribe y "FIN n".
+# una cosa por línea; la respuesta en ENV:dashgit/NOMBRE.respuesta: "n rc ms", lo que escribe y "FIN n". El mismo n
+# otra vez no repite la orden: escribe otra vez su respuesta (el cliente lo hace si no la ve: el aviso o la escritura
+# se pueden perder si coinciden con una lectura).
 # Con --dueno, acaba cuando ese puerto deja de existir (se mira cada 2 s). Ctrl-C también lo acaba.
 
 const SERVIDOR_NO = "|clone|fetch|pull|push|servidor|"
@@ -403,6 +405,16 @@ func servir(linea: String, cuerpo: String) -> Int
     return codigo
 end
 
+# Escribe la respuesta; si el cliente la está leyendo justo entonces, el fichero no se deja escribir: se prueba otra
+# vez (hasta 1 s)
+func _escribir_respuesta(f: String, t: String)
+    k = 0
+    while k < 50 and not file_write_text(f, t)
+        time_delay(1)
+        k = k + 1
+    end
+end
+
 func _dueno_vive(p: String) -> Bool
     n = ports_read()
     i = 0
@@ -451,15 +463,20 @@ func orden_servidor(args: [String])
     end
     task_priority(-1)
     ultimo = ""
+    respuesta = ""
     mirado = time_ms()
+    a_medias = false
     while not serv_adios
         r = cx_wait(200)
         if r == -1
             break
         end
-        if vigia == 0 or file_changed(vigia)
+        if vigia == 0 or file_changed(vigia) or a_medias
+            # (el aviso puede llegar al crear el fichero, antes de que esté escrito: entonces se mira otra vez en la
+            # siguiente vuelta, sin esperar a otro aviso, que se puede perder)
             t = file_read_text(f_pedido)
-            if t != nil and t != ""
+            a_medias = t == nil or t == "" or not str_contains(t, "\n")
+            if not a_medias
                 ls = str_find(t, "\n")
                 n = t
                 resto = ""
@@ -468,7 +485,11 @@ func orden_servidor(args: [String])
                     resto = t[ls + 1:]
                 end
                 n = str_trim(n)
-                if n != "" and n != ultimo
+                if n != "" and n == ultimo and respuesta != ""
+                    # el mismo pedido otra vez: el cliente no vio la respuesta (o no se pudo escribir): otra vez,
+                    # sin repetir la orden
+                    _escribir_respuesta(f_respuesta, respuesta)
+                elif n != "" and n != ultimo
                     ultimo = n
                     p2 = str_find(resto, "\n")
                     linea = resto
@@ -483,7 +504,8 @@ func orden_servidor(args: [String])
                     if sal_texto != "" and not str_ends(sal_texto, "\n")
                         sal_texto = sal_texto + "\n"
                     end
-                    file_write_text(f_respuesta, n + " #{rc} #{ms}\n" + sal_texto + "FIN " + n + "\n")
+                    respuesta = n + " #{rc} #{ms}\n" + sal_texto + "FIN " + n + "\n"
+                    _escribir_respuesta(f_respuesta, respuesta)
                     sal_texto = ""
                 end
             end
