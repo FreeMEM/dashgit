@@ -132,12 +132,12 @@ fallos=0
 ver() { iconv -f latin1 -t utf-8 "$d/R/$1.txt" 2>/dev/null; }
 bien() { echo "bien $1"; }
 mal() { echo "FALLO $1"; fallos=$((fallos+1)); }
-[ "$(ver 03)" = "$(printf 'A  nuevo.txt\n M README')" ] && bien "checkout conserva los cambios" || { mal "status tras checkout b:"; ver 02; ver 03; }
-[ "$(ver 05)" = "$(printf 'A  nuevo.txt\n M README')" ] && bien "y al volver también" || { mal "status tras volver:"; ver 04; ver 05; }
+[ "$(ver 03)" = "$(printf ' M README\nA  nuevo.txt')" ] && bien "checkout conserva los cambios" || { mal "status tras checkout b:"; ver 02; ver 03; }
+[ "$(ver 05)" = "$(printf ' M README\nA  nuevo.txt')" ] && bien "y al volver también" || { mal "status tras volver:"; ver 04; ver 05; }
 [ "$(cat "$d/R/a_en_b.txt" 2>/dev/null)" = "nada" ] && bien "checkout de cajón a fichero" || { mal "a en b:"; ver 10; }
 [ "$(cat "$d/R/ax_en_main.txt" 2>/dev/null)" = "dentro" ] && bien "checkout de fichero a cajón" || { mal "a/x en main:"; ver 11; }
 [ -z "$(ver 12)" ] && bien "limpio" || { mal "status:"; ver 12; }
-ver 14 | grep -q "^ M racy.txt" && bien "cambio en el mismo segundo" || { mal "cambio en el mismo segundo:"; ver 14; }
+ver 14 | grep -q "^AM racy.txt" && bien "cambio en el mismo segundo" || { mal "cambio en el mismo segundo:"; ver 14; }
 [ "$(ver 17)" = "$(cat "$tmp/esperado_base.txt")" ] && bien "merge-base como git" || { mal "merge-base: $(ver 17) en vez de $(cat "$tmp/esperado_base.txt")"; }
 if [ "$(cat "$tmp/esperado_salto.txt")" = conflicto ]; then
   ver 18 | grep -q CONFLICTO && bien "sin salto final: conflicto como git" || { mal "sin salto final:"; ver 18; }
