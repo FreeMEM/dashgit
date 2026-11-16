@@ -42,6 +42,7 @@ F='"--format=%H|%h|%P|%p|%an|%ae|%at|%cn|%ce|%ct|%s|%T|%t"'
   echo "dashgit config user.name Prueba >NIL:"
   echo "dashgit config user.email p@p >NIL:"
   echo "dashgit add . >NIL:"
+  echo "dashgit diff --rangos HEAD -- b.txt >DH0:R/rangos_vacio.txt"
   echo "dashgit commit -m uno >NIL:"
   echo "dashgit status --porcelain -b >DH0:R/st_limpio.txt"
   echo "copia DH0:V/a2.txt a.txt"
@@ -143,6 +144,7 @@ for l in open(sys.argv[1], encoding="latin-1"):
     elif q > c: print(f"B {n + c} {q - c}")
 PY
 igual "diff --rangos HEAD a.txt" "$tmp/e_rangos.txt" "$R/rangos.txt"
+igual "diff --rangos HEAD sin commits" <(printf 'F b.txt\nA 1 1\n') "$R/rangos_vacio.txt"
 igual "diff --rangos de un fichero nuevo" <(printf 'F n.txt\nA 1 1\n') "$R/rangos_n.txt"
 # lo demás, con el git del PC sobre el mismo repositorio del Amiga
 cd "$d/P"

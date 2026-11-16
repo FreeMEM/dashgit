@@ -511,7 +511,7 @@ func orden_diff(args: [String])
             end
             revs.push(ia)
             revs.push(ib)
-        elif revs.length < 2 and filtro.length == 0 and rev_commit(x) != ""
+        elif revs.length < 2 and filtro.length == 0 and (rev_commit(x) != "" or x == "HEAD")
             revs.push(x)
         else
             filtro.push(ruta_git(x))
@@ -520,6 +520,11 @@ func orden_diff(args: [String])
     var ids: [String] = []
     for r in revs
         id = rev_commit(r)
+        if id == "" and r == "HEAD" and head_id() == ""
+            # sin commits aún, HEAD es el árbol vacío (como el de git: todo sale como nuevo)
+            ids.push("")
+            continue
+        end
         if id == ""
             aviso("no existe " + r)
             return
