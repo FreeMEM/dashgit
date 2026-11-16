@@ -410,6 +410,16 @@ var _cajon_ignorado: {String: Int} = {}  # 1 ignorado, 2 no: lo ya mirado
 var _ignorar_leido: Bool = false
 var _ign_mayus: Bool = false
 
+# Olvida las reglas leídas (el servidor, antes de cada pedido: un .gitignore puede haber cambiado)
+func ignorar_olvidar()
+    _reglas = []
+    _fuente_desde = {}
+    _fuente_hasta = {}
+    _fuente_leida = {}
+    _cajon_ignorado = {}
+    _ignorar_leido = false
+end
+
 func _es_alnum(c: Int) -> Bool
     return (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c >= 128
 end

@@ -31,6 +31,26 @@ Para que duren tras reiniciar, cópialas a `ENVARC:` (`Copy ENV:DASHGIT#? ENVARC
 El token solo se manda por https (hace falta AmiSSL); por http iría sin cifrar y no se manda nunca (salvo a
 127.0.0.1, que no sale del ordenador).
 
+## Servidor (para Forja y otros programas)
+
+Arrancar dashgit cuesta casi un segundo en un A1200. `dashgit servidor` se queda abierto y contesta órdenes sin ese
+coste:
+
+    dashgit servidor [NOMBRE] [--dueno PUERTO]
+
+- Abre el puerto ARexx `NOMBRE` (`DASHGIT` si no se dice). Cada orden es una línea como en el Shell, con `-C cajón`
+  si hace falta: `ADDRESS DASHGIT '-C Work:juego status --porcelain -b'`. RC es el código de la orden y, con 0,
+  RESULT es lo que escribe. `ADIOS` lo cierra.
+- Para un programa que no quiere quedarse esperando (Forja), por ficheros: escribe en `ENV:dashgit/NOMBRE.pedido`
+  un número en la primera línea, la orden en la segunda y, si hace falta, un texto en las siguientes. La respuesta
+  llega a `ENV:dashgit/NOMBRE.respuesta`: `número rc ms` en la primera línea, lo que escribe la orden y `FIN número`
+  en la última.
+- Con `--dueno PUERTO`, se cierra solo cuando ese puerto ya no está.
+- Dentro no van `clone`, `fetch`, `pull` ni `push`: esas, con dashgit aparte.
+
+`diff --rangos [commit] --texto fichero -- ruta` da los rangos de `ruta` frente a ese texto (por ejemplo, lo que hay
+en el editor sin guardar). En el servidor, `--texto -` es el texto que va tras la orden.
+
 ## Compilar
 
 Necesita un Dash posterior a la 2.2.0, con el PR #108 (SHA-1, adler32, `inflate_used`...).
@@ -50,6 +70,7 @@ En FS-UAE, con `DASH_KICKSTART` apuntando a una ROM de Kickstart 3.1:
     tests/arreglos.sh [cajón de Dash]
     tests/salidas.sh [cajón de Dash]
     tests/stash.sh [cajón de Dash]
+    tests/servidor.sh [cajón de Dash]
     tests/fase4.sh [cajón de Dash]     # red, contra un servidor git en el PC
 
 ## Licencia

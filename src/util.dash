@@ -4,6 +4,27 @@
 # El código de retorno del programa (10 si hubo un error)
 var codigo: Int = 0
 
+# La salida: a la consola o, en el servidor (capturar), a sal_texto (crece en sitio: s = s + t no copia todo)
+var capturar: Bool = false
+var sal_texto: String = ""
+
+func sal(t: String)
+    if capturar
+        sal_texto = sal_texto + t + "\n"
+    else
+        Print t
+    end
+end
+
+# Sin salto de línea al final (el contenido de un fichero)
+func sal_crudo(t: String)
+    if capturar
+        sal_texto = sal_texto + t
+    else
+        console_write(t)
+    end
+end
+
 # Unos bytes en un búfer (el dueño lo libera con trozo_libre)
 struct Trozo
     buf: Pointer = nil

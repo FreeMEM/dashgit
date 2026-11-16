@@ -176,6 +176,22 @@ var indexando_activo: Bool = false
 var indexando: {String: Int} = {}
 var packs_leidos: Bool = false
 
+# Olvida los packs leídos (el servidor, si cambia el repositorio o hay packs nuevos)
+func packs_olvidar()
+    for p in packs_lista
+        if p.fh != 0
+            file_close(p.fh)
+            p.fh = 0
+        end
+        if p.idx != nil
+            buffer_free(p.idx)
+            p.idx = nil
+        end
+    end
+    packs_lista.clear()
+    packs_leidos = false
+end
+
 func cargar_packs()
     packs_leidos = true
     d = git_dir + "/objects/pack"

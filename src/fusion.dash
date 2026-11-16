@@ -479,7 +479,7 @@ func fusionar(suyo: String, nombre_suyo: String, mensaje: String) -> Bool
         return false
     end
     if suyo == mio or es_antepasado(suyo, mio)
-        Print "Ya está al día."
+        sal("Ya está al día.")
         return true
     end
     base = base_comun(mio, suyo)
@@ -495,7 +495,7 @@ func fusionar(suyo: String, nombre_suyo: String, mensaje: String) -> Bool
             return false
         end
         _mover_rama(suyo)
-        Print "Avance rápido: " + mio[:7] + ".." + suyo[:7]
+        sal("Avance rápido: " + mio[:7] + ".." + suyo[:7])
         return true
     end
     if base == ""
@@ -542,7 +542,7 @@ func fusionar(suyo: String, nombre_suyo: String, mensaje: String) -> Bool
             return false
         end
         _mover_rama(id)
-        Print "Fusión hecha: " + id[:7] + " " + mensaje
+        sal("Fusión hecha: " + id[:7] + " " + mensaje)
         return true
     end
     # con conflictos: el índice con las tres etapas, y MERGE_HEAD para el commit de después
@@ -562,7 +562,7 @@ func fusionar(suyo: String, nombre_suyo: String, mensaje: String) -> Bool
     file_write_text(git_dir + "/MERGE_HEAD", suyo + "\n")
     file_write_text(git_dir + "/MERGE_MSG", a_utf8(mensaje) + "\n")
     for c in r.conflictos
-        Print "CONFLICTO en " + utf8_to_latin1(c[:str_find(c, "\t")])
+        sal("CONFLICTO en " + utf8_to_latin1(c[:str_find(c, "\t")]))
     end
     aviso("la fusión tiene conflictos: arréglalos, haz dashgit add de esos ficheros y dashgit commit")
     return false
@@ -601,7 +601,7 @@ func fusion_abortar()
     cambiar_arbol_con(antes, despues, false)
     file_delete(git_dir + "/MERGE_HEAD")
     file_delete(git_dir + "/MERGE_MSG")
-    Print "Fusión deshecha."
+    sal("Fusión deshecha.")
 end
 
 func orden_merge(args: [String])
@@ -643,7 +643,7 @@ func orden_merge_base(args: [String])
         codigo = 1
         return
     end
-    Print m
+    sal(m)
 end
 
 # ---- stash ----
@@ -708,7 +708,7 @@ func _stash_push(mensaje: String)
         return
     end
     if e.preparados.length == 0 and e.sin_preparar.length == 0
-        Print "No hay cambios que guardar"
+        sal("No hay cambios que guardar")
         return
     end
     firma = firma_ahora()
@@ -780,7 +780,7 @@ func _stash_push(mensaje: String)
         aviso("el stash está guardado, pero no se pudo dejar el árbol como en HEAD")
         return
     end
-    Print "Guardado: " + a_latin1(texto)
+    sal("Guardado: " + a_latin1(texto))
 end
 
 # Aplica el stash de la posición p; true si se pudo
@@ -805,7 +805,7 @@ func _stash_aplicar(p: Int, l: [String]) -> Bool
         if r.conflictos.length > 0
             aviso("el stash choca con lo que ha cambiado desde entonces; no se aplica:")
             for c in r.conflictos
-                Print "        " + utf8_to_latin1(c[:str_find(c, "\t")])
+                sal("        " + utf8_to_latin1(c[:str_find(c, "\t")]))
             end
             return false
         end
@@ -871,7 +871,7 @@ func orden_stash(args: [String])
         k = l.length - 1
         while k >= 0
             tab = str_find(l[k], "\t")
-            Print "stash@{#{l.length - 1 - k}}: " + a_latin1(l[k][tab + 1:])
+            sal("stash@{#{l.length - 1 - k}}: " + a_latin1(l[k][tab + 1:]))
             k = k - 1
         end
         return
@@ -906,5 +906,5 @@ func orden_stash(args: [String])
         aviso("no se pudo escribir refs/stash")
         return
     end
-    Print "Quitado stash@{#{l.length - p}} (" + w[:7] + ")"
+    sal("Quitado stash@{#{l.length - p}} (" + w[:7] + ")")
 end

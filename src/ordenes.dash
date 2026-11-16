@@ -5,7 +5,7 @@ import "arbol.dash"
 
 func aviso(msg: String)
     codigo = 10
-    Print "dashgit: " + msg
+    sal("dashgit: " + msg)
 end
 
 # ---- rutas que escribe el usuario ----
@@ -259,9 +259,9 @@ func orden_rm(args: [String])
         if mal.length > 0
             aviso("no se ha borrado nada; estos ficheros tienen cambios que se perderían:")
             for m in mal
-                Print "        " + utf8_to_latin1(m)
+                sal("        " + utf8_to_latin1(m))
             end
-            Print "Haz commit de ellos, o usa --cached para dejarlos en el disco, o -f para borrarlos igualmente."
+            sal("Haz commit de ellos, o usa --cached para dejarlos en el disco, o -f para borrarlos igualmente.")
             return
         end
     end
@@ -278,7 +278,7 @@ func orden_rm(args: [String])
         end
     end
     for r in borradas
-        Print "rm '" + utf8_to_latin1(r) + "'"
+        sal("rm '" + utf8_to_latin1(r) + "'")
         if not solo_indice
             ruta = ruta_amiga(r)
             if file_exists(ruta) and not file_delete(ruta)
@@ -446,7 +446,7 @@ func orden_status(args: [String])
     end
     if corto
         if con_rama
-            Print "## " + linea_de_rama()
+            sal("## " + linea_de_rama())
         end
         # como git: una línea por fichero con las dos letras (índice y árbol de trabajo), por orden de ruta, y los
         # que no se siguen al final
@@ -484,61 +484,61 @@ func orden_status(args: [String])
         end
         rutas.sort(texto_antes)
         for r in rutas
-            Print utf8_to_latin1(xy[r] + " " + r)
+            sal(utf8_to_latin1(xy[r] + " " + r))
         end
         for l in e.nuevos
-            Print utf8_to_latin1(l)
+            sal(utf8_to_latin1(l))
         end
         return
     end
     rama = head_rama()
     if rama == ""
-        Print "HEAD suelto en " + head_id()[:7]
+        sal("HEAD suelto en " + head_id()[:7])
     else
-        Print "En la rama " + rama[11:]
+        sal("En la rama " + rama[11:])
     end
     if head_id() == ""
-        Print "Aún no hay commits"
+        sal("Aún no hay commits")
     end
     if file_exists(git_dir + "/MERGE_HEAD")
-        Print ""
+        sal("")
         if e.conflictos.length > 0
-            Print "Fusión a medias: arregla los conflictos y haz dashgit add y dashgit commit"
-            Print "(o dashgit merge --abort para dejarlo como estaba)."
+            sal("Fusión a medias: arregla los conflictos y haz dashgit add y dashgit commit")
+            sal("(o dashgit merge --abort para dejarlo como estaba).")
         else
-            Print "Fusión a medias: los conflictos están resueltos; haz dashgit commit para acabarla."
+            sal("Fusión a medias: los conflictos están resueltos; haz dashgit commit para acabarla.")
         end
     end
     if e.conflictos.length > 0
-        Print ""
-        Print "Sin fusionar:"
+        sal("")
+        sal("Sin fusionar:")
         for l in e.conflictos
-            Print "        " + utf8_to_latin1(l)
+            sal("        " + utf8_to_latin1(l))
         end
     end
     if e.preparados.length > 0
-        Print ""
-        Print "Cambios para el commit:"
+        sal("")
+        sal("Cambios para el commit:")
         for l in e.preparados
-            Print "        " + utf8_to_latin1(l)
+            sal("        " + utf8_to_latin1(l))
         end
     end
     if e.sin_preparar.length > 0
-        Print ""
-        Print "Cambios sin añadir (dashgit add):"
+        sal("")
+        sal("Cambios sin añadir (dashgit add):")
         for l in e.sin_preparar
-            Print "        " + utf8_to_latin1(l)
+            sal("        " + utf8_to_latin1(l))
         end
     end
     if e.nuevos.length > 0
-        Print ""
-        Print "Ficheros sin seguimiento:"
+        sal("")
+        sal("Ficheros sin seguimiento:")
         for l in e.nuevos
-            Print "        " + utf8_to_latin1(l)
+            sal("        " + utf8_to_latin1(l))
         end
     end
     if e.conflictos.length == 0 and e.preparados.length == 0 and e.sin_preparar.length == 0 and e.nuevos.length == 0
-        Print "No hay nada que confirmar: el árbol de trabajo está limpio"
+        sal("No hay nada que confirmar: el árbol de trabajo está limpio")
     end
 end
 
@@ -550,7 +550,7 @@ func orden_check_ignore(args: [String])
     for a in args
         r = ruta_git(a)
         if r != "?" and r != "" and ignorada(r)
-            Print a
+            sal(a)
             hubo = true
         end
     end
@@ -626,8 +626,8 @@ func orden_commit(args: [String])
     firma = firma_ahora()
     if firma == ""
         aviso("dime quién eres:")
-        Print "  dashgit config --global user.name \"Tu nombre\""
-        Print "  dashgit config --global user.email tu@correo"
+        sal("  dashgit config --global user.name \"Tu nombre\"")
+        sal("  dashgit config --global user.email tu@correo")
         return
     end
     if todo
@@ -657,7 +657,7 @@ func orden_commit(args: [String])
         padres = padres_viejos
     elif padre != ""
         if fusion == "" and commit_arbol(padre) == arbol
-            Print "No hay cambios para el commit (dashgit add para añadirlos)"
+            sal("No hay cambios para el commit (dashgit add para añadirlos)")
             return
         end
         padres.push(padre)
@@ -698,7 +698,7 @@ func orden_commit(args: [String])
         file_delete(git_dir + "/MERGE_HEAD")
         file_delete(git_dir + "/MERGE_MSG")
     end
-    Print "[" + nombre + raiz_txt + " " + id[:7] + "] " + primera
+    sal("[" + nombre + raiz_txt + " " + id[:7] + "] " + primera)
 end
 
 # add de los ficheros que ya sigue el índice (commit -a); false si alguno no se pudo leer
@@ -936,7 +936,7 @@ end
 func escribir_commit(id: String, o: Objeto)
     if log_con_formato
         if log_formato != ""
-            Print a_latin1(formato_commit(log_formato, id, o))
+            sal(a_latin1(formato_commit(log_formato, id, o)))
         end
         return
     end
@@ -946,26 +946,26 @@ func escribir_commit(id: String, o: Objeto)
         if nl >= 0
             msg = msg[:nl]
         end
-        Print id[:7] + " " + msg
+        sal(id[:7] + " " + msg)
         return
     end
-    Print "commit " + id
+    sal("commit " + id)
     var ps0: [String] = commit_padres(o)
     if ps0.length > 1
         l = "Merge:"
         for pp in ps0
             l = l + " " + pp[:7]
         end
-        Print l
+        sal(l)
     end
     autor = commit_campo(o, "author")
-    Print "Autor: " + a_latin1(firma_quien(autor))
-    Print "Fecha: " + firma_fecha(autor)
-    Print ""
+    sal("Autor: " + a_latin1(firma_quien(autor)))
+    sal("Fecha: " + firma_fecha(autor))
+    sal("")
     for l in str_split(str_trim(msg), "\n")
-        Print "    " + l
+        sal("    " + l)
     end
-    Print ""
+    sal("")
 end
 
 # Los ids de esas rutas en un commit, juntos (para ver si un commit las cambia); con caché
@@ -1017,7 +1017,7 @@ func orden_log(args: [String])
     id = rev_commit(desde)
     if id == ""
         if desde == "HEAD"
-            Print "Aún no hay commits"
+            sal("Aún no hay commits")
         else
             aviso("no existe " + desde)
         end
@@ -1153,7 +1153,7 @@ func orden_branch(args: [String])
         # la rama actual (nada con HEAD suelto), como git
         rama = head_rama()
         if rama != ""
-            Print rama[11:]
+            sal(rama[11:])
         end
         return
     end
@@ -1161,9 +1161,9 @@ func orden_branch(args: [String])
         actual = head_rama()
         for b in ramas()
             if "refs/heads/" + b == actual
-                Print "* " + b
+                sal("* " + b)
             else
-                Print "  " + b
+                sal("  " + b)
             end
         end
         return
@@ -1187,7 +1187,7 @@ func orden_branch(args: [String])
             aviso("no se pudo borrar del todo la rama " + n)
             return
         end
-        Print "Rama " + n + " borrada (era " + id[:7] + ")"
+        sal("Rama " + n + " borrada (era " + id[:7] + ")")
         return
     end
     n = args[0]
@@ -1290,9 +1290,9 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
     if mal.length > 0
         aviso("estos ficheros tienen cambios que se perderían:")
         for m in mal
-            Print "        " + utf8_to_latin1(m)
+            sal("        " + utf8_to_latin1(m))
         end
-        Print "Haz commit de ellos o deshazlos antes de cambiar."
+        sal("Haz commit de ellos o deshazlos antes de cambiar.")
         return false
     end
     # quitar lo que ya no está (antes de escribir: un fichero "a" puede dejar sitio a un cajón "a/")
@@ -1311,7 +1311,7 @@ func cambiar_arbol_con(antes: [EntradaIndice], despues: [EntradaIndice], mirar: 
         q = actual.get(d.ruta, 0)
         razon = fuera.get(d.ruta, "")
         if razon != ""
-            Print "dashgit: se salta " + utf8_to_latin1(d.ruta) + ": " + razon
+            sal("dashgit: se salta " + utf8_to_latin1(d.ruta) + ": " + razon)
             x = EntradaIndice()
             x.ruta = d.ruta
             x.id = d.id
@@ -1464,13 +1464,13 @@ func orden_checkout(args: [String])
     if nueva != ""
         ref_escribir("refs/heads/" + nueva, id)
         file_write_text(git_dir + "/HEAD", "ref: refs/heads/" + nueva + "\n")
-        Print "Cambiado a la rama nueva " + nueva
+        sal("Cambiado a la rama nueva " + nueva)
     elif ref_leer("refs/heads/" + destino) != ""
         file_write_text(git_dir + "/HEAD", "ref: refs/heads/" + destino + "\n")
-        Print "Cambiado a la rama " + destino
+        sal("Cambiado a la rama " + destino)
     else
         file_write_text(git_dir + "/HEAD", id + "\n")
-        Print "HEAD suelto en " + id[:7]
+        sal("HEAD suelto en " + id[:7])
     end
 end
 

@@ -54,7 +54,10 @@ func _partir(b: Pointer, n: Int) -> [String]
     return r
 end
 
-# Las operaciones de pasar de a a b: " " igual, "-" quitar, "+" poner, una por línea (en orden)
+# Las operaciones de pasar de a a b: " " igual, "-" quitar, "+" poner, una por línea (en orden). Lo igual del
+# principio y del final se quita antes; lo de en medio, con el algoritmo de Myers (cuesta las líneas por las
+# diferencias: unos pocos cambios en un fichero grande van enseguida) y, si hay demasiadas diferencias, con la tabla
+# del LCS si cabe.
 func operaciones(a: [String], b: [String]) -> [String]
     var ops: [String] = []
     n = a.length
@@ -76,14 +79,147 @@ func operaciones(a: [String], b: [String]) -> [String]
     end
     x = fa - ini
     y = fb - ini
-    # la tabla del LCS solo si cabe (sin multiplicar: con muchas líneas, (x + 1) * (y + 1) se sale de 32 bits)
+    if x == 0 or y == 0
+        i = 0
+        while i < x
+            ops.push("-")
+            i = i + 1
+        end
+        i = 0
+        while i < y
+            ops.push("+")
+            i = i + 1
+        end
+    else
+        var medio: [String] = _myers(a, b, ini, x, y)
+        if medio == nil
+            medio = _lcs(a, b, ini, x, y)
+        end
+        for o in medio
+            ops.push(o)
+        end
+    end
+    i = fa
+    while i < n
+        ops.push(" ")
+        i = i + 1
+    end
+    return ops
+end
+
+const MYERS_MAX = 400     # más diferencias que esto: la tabla del LCS (lo guardado crece con su cuadrado)
+
+# Myers (1986): el camino más corto de a a b. nil si hay más de MYERS_MAX diferencias
+# (de a[ini..ini + x) a b[ini..ini + y))
+func _myers(a: [String], b: [String], ini: Int, x: Int, y: Int) -> [String]
+    off = MYERS_MAX + 2
+    var v: [Int] = []
+    i = 0
+    while i < 2 * off + 2
+        v.push(0)
+        i = i + 1
+    end
+    # lo que valía v antes de cada paso d (de -(d-1) a d-1), seguido
+    var hist: [Int] = []
+    var desde: [Int] = []
+    fin = -1
+    d = 0
+    while d <= MYERS_MAX and fin < 0
+        desde.push(hist.length)
+        j = -(d - 1)
+        while j <= d - 1
+            hist.push(v[off + j])
+            j = j + 2
+        end
+        k = -d
+        while k <= d
+            xx = 0
+            if k == -d or (k != d and v[off + k - 1] < v[off + k + 1])
+                xx = v[off + k + 1]
+            else
+                xx = v[off + k - 1] + 1
+            end
+            yy = xx - k
+            while xx < x and yy < y and a[ini + xx] == b[ini + yy]
+                xx = xx + 1
+                yy = yy + 1
+            end
+            v[off + k] = xx
+            if xx >= x and yy >= y
+                fin = d
+                break
+            end
+            k = k + 2
+        end
+        d = d + 1
+    end
+    if fin < 0
+        return nil
+    end
+    # hacia atrás, de (x, y) a (0, 0)
+    var rev: [String] = []
+    cx = x
+    cy = y
+    d = fin
+    while d > 0
+        k = cx - cy
+        base = desde[d]
+        pk = 0
+        # v[j] antes del paso d: hist[base + (j + d - 1) / 2] (j con la paridad de d - 1)
+        if k == -d or (k != d and hist[base + (k - 1 + d - 1) / 2] < hist[base + (k + 1 + d - 1) / 2])
+            pk = k + 1
+        else
+            pk = k - 1
+        end
+        px = hist[base + (pk + d - 1) / 2]
+        py = px - pk
+        # lo igual tras el paso
+        sx = px
+        sy = py
+        if pk == k + 1
+            sy = py + 1
+        else
+            sx = px + 1
+        end
+        while cx > sx and cy > sy
+            rev.push(" ")
+            cx = cx - 1
+            cy = cy - 1
+        end
+        if pk == k + 1
+            rev.push("+")
+        else
+            rev.push("-")
+        end
+        cx = px
+        cy = py
+        d = d - 1
+    end
+    while cx > 0
+        rev.push(" ")
+        cx = cx - 1
+    end
+    var ops: [String] = []
+    i = rev.length - 1
+    while i >= 0
+        ops.push(rev[i])
+        i = i - 1
+    end
+    return ops
+end
+
+# La tabla del LCS (con muchas diferencias), si cabe; si no, todo quitado y todo puesto
+func _lcs(a: [String], b: [String], ini: Int, x: Int, y: Int) -> [String]
+    var ops: [String] = []
+    # (sin multiplicar: con muchas líneas, (x + 1) * (y + 1) se sale de 32 bits)
     var t: Pointer = nil
     w = y + 1
-    if x > 0 and y > 0 and x + 1 <= MAX_CELDAS / (y + 1)
+    i = 0
+    j = 0
+    if x + 1 <= MAX_CELDAS / (y + 1)
         t = buffer_alloc((x + 1) * w * 2)
     end
     if t != nil
-        # LCS: t[i][j] = lo más largo común de a[ini+i..fa) y b[ini+j..fb)
         buffer_fill(t, 0, (x + 1) * w * 2, 0)
         i = x - 1
         while i >= 0
@@ -118,31 +254,15 @@ func operaciones(a: [String], b: [String]) -> [String]
                 j = j + 1
             end
         end
-        while i < x
-            ops.push("-")
-            i = i + 1
-        end
-        while j < y
-            ops.push("+")
-            j = j + 1
-        end
         buffer_free(t)
-    else
-        i = 0
-        while i < x
-            ops.push("-")
-            i = i + 1
-        end
-        i = 0
-        while i < y
-            ops.push("+")
-            i = i + 1
-        end
     end
-    i = fa
-    while i < n
-        ops.push(" ")
+    while i < x
+        ops.push("-")
         i = i + 1
+    end
+    while j < y
+        ops.push("+")
+        j = j + 1
     end
     return ops
 end
@@ -218,18 +338,18 @@ func escribir_trozos(a: [String], b: [String])
             end
             z = z + 1
         end
-        Print "@@ -" + _rango(ia + 1, ca) + " +" + _rango(ib + 1, cb) + " @@"
+        sal("@@ -" + _rango(ia + 1, ca) + " +" + _rango(ib + 1, cb) + " @@")
         z = ini
         while z < fin
             if ops[z] == " "
-                Print " " + a[ia]
+                sal(" " + a[ia])
                 ia = ia + 1
                 ib = ib + 1
             elif ops[z] == "-"
-                Print "-" + a[ia]
+                sal("-" + a[ia])
                 ia = ia + 1
             else
-                Print "+" + b[ib]
+                sal("+" + b[ib])
                 ib = ib + 1
             end
             z = z + 1
@@ -241,7 +361,7 @@ end
 # El diff de un fichero: ids "" para "no está"; con en_trabajo, b se lee del disco
 func diff_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_b: Int, en_trabajo: Bool)
     nombre = utf8_to_latin1(ruta)
-    Print "diff --git a/" + nombre + " b/" + nombre
+    sal("diff --git a/" + nombre + " b/" + nombre)
     var a: [String] = lineas_de(id_a)
     var b: [String] = []
     if en_trabajo
@@ -259,27 +379,27 @@ func diff_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_b:
         cb = id_b[:7]
     end
     if id_a == ""
-        Print "new file mode " + modo_texto(modo_b)
-        Print "index " + ca + ".." + cb
+        sal("new file mode " + modo_texto(modo_b))
+        sal("index " + ca + ".." + cb)
     elif id_b == "" and not en_trabajo
-        Print "deleted file mode " + modo_texto(modo_a)
-        Print "index " + ca + ".." + cb
+        sal("deleted file mode " + modo_texto(modo_a))
+        sal("index " + ca + ".." + cb)
     else
-        Print "index " + ca + ".." + cb + " " + modo_texto(modo_a)
+        sal("index " + ca + ".." + cb + " " + modo_texto(modo_a))
     end
     if a == nil or b == nil
-        Print "Binary files differ"
+        sal("Binary files differ")
         return
     end
     if id_a == ""
-        Print "--- /dev/null"
+        sal("--- /dev/null")
     else
-        Print "--- a/" + nombre
+        sal("--- a/" + nombre)
     end
     if id_b == "" and not en_trabajo
-        Print "+++ /dev/null"
+        sal("+++ /dev/null")
     else
-        Print "+++ b/" + nombre
+        sal("+++ b/" + nombre)
     end
     escribir_trozos(a, b)
 end
@@ -312,7 +432,7 @@ func cambio_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_
     if diff_modo == D_PARCHE
         diff_fichero(ruta, id_a, modo_a, id_b, modo_b, en_trabajo)
     elif diff_modo == D_NOMBRES
-        Print nombre
+        sal(nombre)
     elif diff_modo == D_LETRAS
         letra = "M"
         if id_a == ""
@@ -320,11 +440,11 @@ func cambio_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_
         elif id_b == "" and not en_trabajo
             letra = "D"
         end
-        Print letra + "\t" + nombre
+        sal(letra + "\t" + nombre)
     elif diff_modo == D_CUENTAS
         _lados(ruta, id_a, id_b, en_trabajo)
         if _la == nil or _lb == nil
-            Print "-\t-\t" + nombre
+            sal("-\t-\t" + nombre)
         else
             mas = 0
             menos = 0
@@ -335,7 +455,7 @@ func cambio_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_
                     menos = menos + 1
                 end
             end
-            Print str_from_int(mas, 10) + "\t" + str_from_int(menos, 10) + "\t" + nombre
+            sal(str_from_int(mas, 10) + "\t" + str_from_int(menos, 10) + "\t" + nombre)
         end
     else
         diff_rangos(ruta, id_a, id_b, en_trabajo)
@@ -348,9 +468,14 @@ end
 # Un fichero binario da "F ruta" y "X".
 func diff_rangos(ruta: String, id_a: String, id_b: String, en_trabajo: Bool)
     _lados(ruta, id_a, id_b, en_trabajo)
-    Print "F " + utf8_to_latin1(ruta)
+    _rangos_sal(ruta)
+end
+
+# Los rangos de _la a _lb
+func _rangos_sal(ruta: String)
+    sal("F " + utf8_to_latin1(ruta))
     if _la == nil or _lb == nil
-        Print "X"
+        sal("X")
         return
     end
     var ops: [String] = operaciones(_la, _lb)
@@ -378,15 +503,311 @@ func diff_rangos(ruta: String, id_a: String, id_b: String, en_trabajo: Bool)
             cambiadas = puestas
         end
         if cambiadas > 0
-            Print "C " + str_from_int(linea, 10) + " " + str_from_int(cambiadas, 10)
+            sal("C " + str_from_int(linea, 10) + " " + str_from_int(cambiadas, 10))
         end
         if puestas > cambiadas
-            Print "A " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(puestas - cambiadas, 10)
+            sal("A " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(puestas - cambiadas, 10))
         elif quitadas > cambiadas
-            Print "B " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(quitadas - cambiadas, 10)
+            sal("B " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(quitadas - cambiadas, 10))
         end
         linea = linea + puestas
     end
+end
+
+# ---- --texto: los rangos de un fichero de un commit frente a un texto (lo que hay en un editor, sin guardar) ----
+
+var diff_texto: String = ""      # el fichero de --texto ("-": diff_cuerpo, el cuerpo del pedido del servidor)
+var diff_cuerpo: String = ""
+
+# Lo ya leído (el servidor lo guarda entre pedidos): commit + ruta -> el blob, y las líneas de unos pocos blobs
+var _cache_rutas: {String: String} = {}
+var _cache_n: Int = 0
+var _cache_ids: [String] = []
+var _cache_lineas: [Lineas] = []
+const CACHE_BLOBS = 6
+
+struct Lineas
+    l: [String] = nil      # nil: binario
+end
+
+func _blob_de(commit: String, ruta: String) -> String
+    if commit == ""
+        return ""
+    end
+    clave = commit + ":" + ruta
+    ya = _cache_rutas.get(clave, "?")
+    if ya != "?"
+        return ya
+    end
+    if _cache_n > 200
+        _cache_rutas = {}
+        _cache_n = 0
+    end
+    id = id_en_arbol(commit_arbol(commit), ruta)
+    _cache_rutas[clave] = id
+    _cache_n = _cache_n + 1
+    return id
+end
+
+func _lineas_blob(id: String) -> [String]
+    i = 0
+    while i < _cache_ids.length
+        if _cache_ids[i] == id
+            return _cache_lineas[i].l
+        end
+        i = i + 1
+    end
+    x = Lineas()
+    x.l = lineas_de(id)
+    if _cache_ids.length >= CACHE_BLOBS
+        _cache_ids.remove(0)
+        _cache_lineas.remove(0)
+    end
+    _cache_ids.push(id)
+    _cache_lineas.push(x)
+    return x.l
+end
+
+func rangos_texto(ruta: String, commit: String)
+    var t: Trozo = nil
+    if diff_texto == "-"
+        t = texto_a_trozo(diff_cuerpo)
+    else
+        t = leer_fichero(diff_texto)
+    end
+    if t == nil
+        aviso("no se puede leer " + diff_texto)
+        return
+    end
+    _la = _lineas_blob(_blob_de(commit, ruta))
+    mira = t.n
+    if mira > 8000
+        mira = 8000
+    end
+    if _la == nil or (mira > 0 and buffer_find_byte(t.buf, 0, mira, 0) >= 0)
+        sal("F " + utf8_to_latin1(ruta))
+        sal("X")
+    elif not _rangos_rapido(ruta, t.buf, t.n)
+        # demasiadas diferencias para la cuenta rápida: con las listas de siempre
+        _lb = _partir(t.buf, t.n)
+        _rangos_sal(ruta)
+    end
+    trozo_libre(t)
+end
+
+# ---- rangos rápidos: el texto nuevo se queda en su búfer (sin una lista de líneas: en un 68020, meter cada línea
+# en una lista cuesta más que todo lo demás) y se compara con las líneas de _la con buffer_equals ----
+
+const RAPIDO_MAX = 200     # diferencias como mucho (lo guardado crece con su cuadrado)
+
+var _rb: Pointer = nil     # el texto
+var _ro: Pointer = nil     # de cada línea: dónde empieza y cuántos bytes (dos longs)
+var _rn: Int = 0           # cuántas líneas
+var _rsin: Bool = false    # la última no acaba en salto de línea
+
+# ¿La línea i de _la es la j del texto?
+func _ig(i: Int, j: Int) -> Bool
+    o = buffer_get_long(_ro, j * 8)
+    l = buffer_get_long(_ro, j * 8 + 4)
+    if j == _rn - 1 and _rsin
+        return _la[i] == str_from_buffer(_rb, o, l) + "\n\\ No newline at end of file"
+    end
+    return buffer_equals(_rb, o, l, _la[i])
+end
+
+# Los rangos de _la frente al texto de b (n bytes); false si hay más de RAPIDO_MAX diferencias (no escribe nada)
+func _rangos_rapido(ruta: String, b: Pointer, n: Int) -> Bool
+    # las líneas: cuántas, y luego dónde
+    cuantas = 0
+    i = 0
+    while i < n
+        nl = buffer_find_byte(b, i, n, 10)
+        cuantas = cuantas + 1
+        if nl < 0
+            i = n
+        else
+            i = nl + 1
+        end
+    end
+    _rb = b
+    _rn = cuantas
+    _rsin = n > 0 and buffer_get_byte(b, n - 1) != 10
+    _ro = buffer_alloc(cuantas * 8 + 8)
+    k = 0
+    i = 0
+    while i < n
+        nl = buffer_find_byte(b, i, n, 10)
+        fin = nl
+        if nl < 0
+            fin = n
+        end
+        buffer_set_long(_ro, k * 8, i)
+        buffer_set_long(_ro, k * 8 + 4, fin - i)
+        k = k + 1
+        i = fin + 1
+    end
+    na = _la.length
+    nb = cuantas
+    ini = 0
+    while ini < na and ini < nb and _ig(ini, ini)
+        ini = ini + 1
+    end
+    fa = na
+    fb = nb
+    while fa > ini and fb > ini and _ig(fa - 1, fb - 1)
+        fa = fa - 1
+        fb = fb - 1
+    end
+    x = fa - ini
+    y = fb - ini
+    # Myers sobre lo de en medio; los pasos, hacia atrás, en ops (" ", "-", "+" como bytes 32, 45, 43)
+    ops = buffer_alloc(x + y + 1)
+    pos = x + y         # ops[pos..x+y) es lo hecho
+    if x == 0 or y == 0
+        k = 0
+        while k < y
+            pos = pos - 1
+            buffer_set_byte(ops, pos, 43)
+            k = k + 1
+        end
+        k = 0
+        while k < x
+            pos = pos - 1
+            buffer_set_byte(ops, pos, 45)
+            k = k + 1
+        end
+    else
+        off = RAPIDO_MAX + 2
+        v = buffer_alloc((2 * off + 2) * 4)
+        buffer_fill(v, 0, (2 * off + 2) * 4, 0)
+        hist = buffer_alloc((RAPIDO_MAX + 2) * (RAPIDO_MAX + 2) * 4)
+        desde = buffer_alloc((RAPIDO_MAX + 2) * 4)
+        nh = 0
+        fin_d = -1
+        d = 0
+        while d <= RAPIDO_MAX and fin_d < 0
+            buffer_set_long(desde, d * 4, nh)
+            j = -(d - 1)
+            while j <= d - 1
+                buffer_set_long(hist, nh * 4, buffer_get_long(v, (off + j) * 4))
+                nh = nh + 1
+                j = j + 2
+            end
+            k = -d
+            while k <= d
+                xx = 0
+                if k == -d or (k != d and buffer_get_long(v, (off + k - 1) * 4) < buffer_get_long(v, (off + k + 1) * 4))
+                    xx = buffer_get_long(v, (off + k + 1) * 4)
+                else
+                    xx = buffer_get_long(v, (off + k - 1) * 4) + 1
+                end
+                yy = xx - k
+                while xx < x and yy < y and _ig(ini + xx, ini + yy)
+                    xx = xx + 1
+                    yy = yy + 1
+                end
+                buffer_set_long(v, (off + k) * 4, xx)
+                if xx >= x and yy >= y
+                    fin_d = d
+                    break
+                end
+                k = k + 2
+            end
+            d = d + 1
+        end
+        if fin_d >= 0
+            cx = x
+            cy = y
+            d = fin_d
+            while d > 0
+                k = cx - cy
+                base = buffer_get_long(desde, d * 4)
+                pk = 0
+                if k == -d or (k != d and buffer_get_long(hist, (base + (k - 1 + d - 1) / 2) * 4) < buffer_get_long(hist, (base + (k + 1 + d - 1) / 2) * 4))
+                    pk = k + 1
+                else
+                    pk = k - 1
+                end
+                px = buffer_get_long(hist, (base + (pk + d - 1) / 2) * 4)
+                py = px - pk
+                sx = px
+                sy = py
+                if pk == k + 1
+                    sy = py + 1
+                else
+                    sx = px + 1
+                end
+                while cx > sx and cy > sy
+                    pos = pos - 1
+                    buffer_set_byte(ops, pos, 32)
+                    cx = cx - 1
+                    cy = cy - 1
+                end
+                pos = pos - 1
+                if pk == k + 1
+                    buffer_set_byte(ops, pos, 43)
+                else
+                    buffer_set_byte(ops, pos, 45)
+                end
+                cx = px
+                cy = py
+                d = d - 1
+            end
+            while cx > 0
+                pos = pos - 1
+                buffer_set_byte(ops, pos, 32)
+                cx = cx - 1
+            end
+        end
+        buffer_free(v)
+        buffer_free(hist)
+        buffer_free(desde)
+        if fin_d < 0
+            buffer_free(ops)
+            buffer_free(_ro)
+            _ro = nil
+            return false
+        end
+    end
+    # los rangos, como _rangos_sal
+    sal("F " + utf8_to_latin1(ruta))
+    total = x + y
+    linea = ini + 1
+    k = pos
+    while k < total
+        if buffer_get_byte(ops, k) == 32
+            linea = linea + 1
+            k = k + 1
+            continue
+        end
+        quitadas = 0
+        puestas = 0
+        while k < total and buffer_get_byte(ops, k) != 32
+            if buffer_get_byte(ops, k) == 45
+                quitadas = quitadas + 1
+            else
+                puestas = puestas + 1
+            end
+            k = k + 1
+        end
+        cambiadas = quitadas
+        if puestas < cambiadas
+            cambiadas = puestas
+        end
+        if cambiadas > 0
+            sal("C " + str_from_int(linea, 10) + " " + str_from_int(cambiadas, 10))
+        end
+        if puestas > cambiadas
+            sal("A " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(puestas - cambiadas, 10))
+        elif quitadas > cambiadas
+            sal("B " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(quitadas - cambiadas, 10))
+        end
+        linea = linea + puestas
+    end
+    buffer_free(ops)
+    buffer_free(_ro)
+    _ro = nil
+    return true
 end
 
 # El id de lo que hay en el disco de un fichero del índice; "" si no está
@@ -482,8 +903,20 @@ end
 #   sin commits: el índice contra el disco; --cached: HEAD (o el commit) contra el índice; un commit: el commit
 #   contra el disco; dos (o a..b): el uno contra el otro. Opciones: --name-only, --name-status, --numstat, --rangos,
 #   -U n (--unified=n).
-func orden_diff(args: [String])
+func orden_diff(todos: [String])
     preparado = false
+    diff_texto = ""
+    var args: [String] = []
+    i = 0
+    while i < todos.length
+        if todos[i] == "--texto" and i + 1 < todos.length
+            diff_texto = todos[i + 1]
+            i = i + 1
+        else
+            args.push(todos[i])
+        end
+        i = i + 1
+    end
     var revs: [String] = []
     var filtro: [String] = []
     rutas_ya = false
@@ -530,6 +963,18 @@ func orden_diff(args: [String])
             return
         end
         ids.push(id)
+    end
+    if diff_texto != ""
+        if filtro.length != 1 or ids.length > 1 or preparado or diff_modo != D_RANGOS
+            aviso("--texto: diff --rangos [commit] --texto fichero -- ruta")
+            return
+        end
+        base = head_id()
+        if ids.length == 1
+            base = ids[0]
+        end
+        rangos_texto(filtro[0], base)
+        return
     end
     if ids.length == 2
         var c1: [EntradaIndice] = ficheros_de_commit(ids[0])
@@ -618,10 +1063,10 @@ func orden_show(args: [String])
                 if e.modo == "40000"
                     n = n + "/"
                 end
-                Print n
+                sal(n)
             end
         elif o.n > 0
-            console_write(str_from_buffer(o.datos, 0, o.n))
+            sal_crudo(str_from_buffer(o.datos, 0, o.n))
         end
         objeto_libre(o)
         return
@@ -643,7 +1088,7 @@ func orden_show(args: [String])
         return
     end
     if log_con_formato and log_formato != ""
-        Print ""
+        sal("")
     end
     var antes: [EntradaIndice] = []
     if ps.length == 1

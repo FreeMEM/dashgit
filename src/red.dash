@@ -531,7 +531,7 @@ func orden_clone(args: [String])
         aviso("ya hay un repositorio en " + destino)
         return
     end
-    Print "Clonando en " + destino + "..."
+    sal("Clonando en " + destino + "...")
     r = descubrir(url, "git-upload-pack")
     if r.error != ""
         aviso(r.error)
@@ -562,7 +562,7 @@ func orden_clone(args: [String])
         end
     end
     if quiero.length == 0
-        Print "El repositorio está vacío."
+        sal("El repositorio está vacío.")
         return
     end
     var nada: [String] = []
@@ -584,7 +584,7 @@ func orden_clone(args: [String])
     end
     id = remoto_ref(r, cabeza)
     if id == ""
-        Print "No se sabe qué rama sacar: el repositorio queda sin ficheros (dashgit checkout rama)."
+        sal("No se sabe qué rama sacar: el repositorio queda sin ficheros (dashgit checkout rama).")
         return
     end
     rama = cabeza[11:]
@@ -602,7 +602,7 @@ func orden_clone(args: [String])
     if not cambiar_arbol_con(vacio, despues, false)
         return
     end
-    Print "Hecho: rama " + rama + ", " + str_from_int(despues.length, 10) + " ficheros."
+    sal("Hecho: rama " + rama + ", " + str_from_int(despues.length, 10) + " ficheros.")
 end
 
 # ---- fetch ----
@@ -657,14 +657,14 @@ func traer(nombre: String) -> Remoto
             if antes != x.id
                 ref_escribir(ref, x.id)
                 if antes == ""
-                    Print " * [nueva rama]  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:]
+                    sal(" * [nueva rama]  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:])
                 else
-                    Print "   " + antes[:7] + ".." + x.id[:7] + "  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:]
+                    sal("   " + antes[:7] + ".." + x.id[:7] + "  " + x.nombre[11:] + " -> " + nombre + "/" + x.nombre[11:])
                 end
             end
         elif str_starts(x.nombre, "refs/tags/") and ref_leer(x.nombre) == ""
             ref_escribir(x.nombre, x.id)
-            Print " * [nueva etiqueta]  " + x.nombre[10:]
+            sal(" * [nueva etiqueta]  " + x.nombre[10:])
         end
     end
     return r
@@ -701,7 +701,7 @@ func orden_pull(args: [String])
     end
     mio = head_id()
     if mio == suyo or es_antepasado(suyo, mio)
-        Print "Ya está al día."
+        sal("Ya está al día.")
         return
     end
     if not es_antepasado(mio, suyo)
@@ -718,7 +718,7 @@ func orden_pull(args: [String])
         return
     end
     ref_escribir(rama, suyo)
-    Print "Avance rápido: " + mio[:7] + ".." + suyo[:7]
+    sal("Avance rápido: " + mio[:7] + ".." + suyo[:7])
 end
 
 # ---- push ----
@@ -865,7 +865,7 @@ func orden_push(args: [String])
     end
     suyo = remoto_ref(r, rama)
     if suyo == mio
-        Print "Ya está al día."
+        sal("Ya está al día.")
         return
     end
     if suyo != "" and not (objeto_existe(suyo) and es_antepasado(suyo, mio))
@@ -992,7 +992,7 @@ func orden_push(args: [String])
         if suyo != ""
             antes = suyo[:7] + ".." + mio[:7]
         end
-        Print "A " + url
-        Print "   " + antes + "  " + corta + " -> " + corta
+        sal("A " + url)
+        sal("   " + antes + "  " + corta + " -> " + corta)
     end
 end
