@@ -262,6 +262,11 @@ end
 
 # Guarda un commit; su id ("" si falló)
 func commit_crear(arbol: String, padres: [String], firma: String, mensaje: String) -> String
+    return commit_crear_con(arbol, padres, firma, firma, mensaje)
+end
+
+# Como commit_crear, con autor y committer distintos (commit --amend conserva el autor)
+func commit_crear_con(arbol: String, padres: [String], autor: String, firma: String, mensaje: String) -> String
     t = "tree " + arbol + "\n"
     for p in padres
         t = t + "parent " + p + "\n"
@@ -270,7 +275,7 @@ func commit_crear(arbol: String, padres: [String], firma: String, mensaje: Strin
     if not str_ends(m, "\n")
         m = m + "\n"
     end
-    t = t + "author " + firma + "\ncommitter " + firma + "\n\n" + m
+    t = t + "author " + autor + "\ncommitter " + firma + "\n\n" + m
     return objeto_escribir_texto("commit", t)
 end
 

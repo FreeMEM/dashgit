@@ -562,9 +562,12 @@ end
 func orden_commit(args: [String])
     mensaje = ""
     todo = false
+    enmendar = false
     i = 0
     while i < args.length
-        if args[i] == "-m" and i + 1 < args.length
+        if args[i] == "--amend"
+            enmendar = true
+        elif args[i] == "-m" and i + 1 < args.length
             if mensaje != ""
                 mensaje = mensaje + "\n\n"
             end
@@ -592,6 +595,27 @@ func orden_commit(args: [String])
                 return
             end
         end
+    end
+    # --amend: el commit de HEAD se rehace (con sus padres y su autor; el mensaje, el suyo si no se da otro)
+    autor = ""
+    var padres_viejos: [String] = []
+    if enmendar
+        if fusion != ""
+            aviso("hay una fusión a medias: acábala con dashgit commit antes de --amend")
+            return
+        end
+        h = head_id()
+        oh = objeto_leer(h)
+        if h == "" or oh == nil
+            aviso("no hay commit que enmendar")
+            return
+        end
+        if mensaje == ""
+            mensaje = a_latin1(str_trim(commit_mensaje(oh)))
+        end
+        autor = commit_campo(oh, "author")
+        padres_viejos = commit_padres(oh)
+        objeto_libre(oh)
     end
     if mensaje == ""
         aviso("falta el mensaje: dashgit commit -m \"mensaje\"")
@@ -627,7 +651,9 @@ func orden_commit(args: [String])
         return
     end
     var padres: [String] = []
-    if padre != ""
+    if enmendar
+        padres = padres_viejos
+    elif padre != ""
         if fusion == "" and commit_arbol(padre) == arbol
             Print "No hay cambios para el commit (dashgit add para añadirlos)"
             return
@@ -637,7 +663,10 @@ func orden_commit(args: [String])
     if fusion != ""
         padres.push(fusion)
     end
-    id = commit_crear(arbol, padres, a_utf8(firma), a_utf8(mensaje))
+    if autor == ""
+        autor = a_utf8(firma)
+    end
+    id = commit_crear_con(arbol, padres, autor, a_utf8(firma), a_utf8(mensaje))
     if id == ""
         aviso("no se pudo guardar el commit")
         return
@@ -653,7 +682,9 @@ func orden_commit(args: [String])
         nombre = rama[11:]
     end
     raiz_txt = ""
-    if padre == ""
+    if enmendar
+        raiz_txt = " (enmendado)"
+    elif padre == ""
         raiz_txt = " (primer commit)"
     end
     primera = mensaje
@@ -1456,7 +1487,7 @@ end
 
 # Una entrada del índice para lo que hay en un commit: si el índice ya tenía ese mismo contenido, con sus datos
 # del disco; si no, con su tamaño y sin fecha (status lo vuelve a mirar)
-func _entrada_de(c: EntradaIndice, viejo: [EntradaIndice]) -> EntradaIndice
+func entrada_de_commit(c: EntradaIndice, viejo: [EntradaIndice]) -> EntradaIndice
     p = indice_buscar(viejo, c.ruta)
     if p >= 0 and viejo[p].id == c.id and viejo[p].etapa == 0
         x = viejo[p]
@@ -1529,7 +1560,7 @@ func orden_reset(args: [String])
         else
             var nuevo: [EntradaIndice] = []
             for c in cab
-                nuevo.push(_entrada_de(c, idx))
+                nuevo.push(entrada_de_commit(c, idx))
             end
             if not indice_escribir(nuevo)
                 aviso("no se pudo escribir el índice")
@@ -1564,7 +1595,7 @@ func orden_reset(args: [String])
     for c in cab
         for r in filtro
             if dentro_de(c.ruta, r)
-                resultado.push(_entrada_de(c, idx))
+                resultado.push(entrada_de_commit(c, idx))
                 break
             end
         end

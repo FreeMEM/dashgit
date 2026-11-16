@@ -645,3 +645,266 @@ func orden_merge_base(args: [String])
     end
     Print m
 end
+
+# ---- stash ----
+# Como el de git: refs/stash apunta a un commit W (el árbol de trabajo de los ficheros seguidos) con dos padres, HEAD
+# y un commit I con el índice; la lista está en logs/refs/stash (la última línea es stash@{0}). El git del PC lo lee.
+
+func _stash_lineas() -> [String]
+    var r: [String] = []
+    t = file_read_text(git_dir + "/logs/refs/stash")
+    if t == nil
+        return r
+    end
+    for l in str_split(t, "\n")
+        if l.length > 82
+            r.push(l)
+        end
+    end
+    return r
+end
+
+func _stash_escribir(l: [String]) -> Bool
+    if l.length == 0
+        file_delete(git_dir + "/logs/refs/stash")
+        return ref_borrar("refs/stash")
+    end
+    t = ""
+    for x in l
+        t = t + x + "\n"
+    end
+    crear_cajones(git_dir + "/logs/refs")
+    if not file_write_text(git_dir + "/logs/refs/stash", t)
+        return false
+    end
+    return ref_escribir("refs/stash", l[l.length - 1][41:81])
+end
+
+# "stash@{2}" o "2" a su posición en la lista (desde el final); -1 si no vale
+func _stash_num(a: String, cuantos: Int) -> Int
+    n = a
+    if str_starts(n, "stash@{") and str_ends(n, "}")
+        n = n[7:n.length - 1]
+    end
+    k = str_to_int(n, 10)
+    if n == "" or (k == 0 and n != "0") or k < 0 or k >= cuantos
+        return -1
+    end
+    return cuantos - 1 - k
+end
+
+func _stash_push(mensaje: String)
+    h = head_id()
+    if h == ""
+        aviso("aún no hay commits: no se puede guardar")
+        return
+    end
+    e = estado(true)
+    if e == nil
+        return
+    end
+    if e.conflictos.length > 0
+        aviso("hay conflictos sin resolver (dashgit status)")
+        return
+    end
+    if e.preparados.length == 0 and e.sin_preparar.length == 0
+        Print "No hay cambios que guardar"
+        return
+    end
+    firma = firma_ahora()
+    if firma == ""
+        aviso("falta user.name o user.email (dashgit config)")
+        return
+    end
+    firma = a_utf8(firma)
+    rama = head_rama()
+    nombre = "(no branch)"
+    if rama != ""
+        nombre = rama[11:]
+    end
+    oh = objeto_leer(h)
+    asunto = ""
+    if oh != nil
+        asunto = commit_mensaje(oh)
+        nl = str_find(asunto, "\n")
+        if nl >= 0
+            asunto = asunto[:nl]
+        end
+        objeto_libre(oh)
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    ia = arbol_del_indice(idx)
+    var ph: [String] = [h]
+    i_id = commit_crear(ia, ph, firma, "index on " + nombre + ": " + h[:7] + " " + asunto + "\n")
+    # el árbol de trabajo: lo que hay en el disco de cada fichero del índice (los borrados, fuera)
+    var trabajo: [EntradaIndice] = []
+    for x in idx
+        if x.etapa == 0
+            id = id_en_trabajo(x)
+            if id != ""
+                if id != x.id
+                    id = trabajo_guardar(x.ruta, true)
+                end
+                y = EntradaIndice()
+                y.ruta = x.ruta
+                y.id = id
+                y.modo = x.modo
+                trabajo.push(y)
+            end
+        end
+    end
+    wa = arbol_del_indice(trabajo)
+    texto = "WIP on " + nombre + ": " + h[:7] + " " + asunto
+    if mensaje != ""
+        texto = "On " + nombre + ": " + a_utf8(mensaje)
+    end
+    var pw: [String] = [h, i_id]
+    w = commit_crear(wa, pw, firma, texto + "\n")
+    if i_id == "" or w == ""
+        aviso("no se pudo guardar el stash")
+        return
+    end
+    var l: [String] = _stash_lineas()
+    viejo = ref_leer("refs/stash")
+    if viejo == ""
+        viejo = "0000000000000000000000000000000000000000"
+    end
+    l.push(viejo + " " + w + " " + firma + "\t" + texto)
+    if not _stash_escribir(l)
+        aviso("no se pudo escribir refs/stash")
+        return
+    end
+    # y el árbol de trabajo y el índice, como en HEAD
+    var cab: [EntradaIndice] = ficheros_de_commit(h)
+    if cab == nil or not cambiar_arbol_con(trabajo, cab, false)
+        aviso("el stash está guardado, pero no se pudo dejar el árbol como en HEAD")
+        return
+    end
+    Print "Guardado: " + a_latin1(texto)
+end
+
+# Aplica el stash de la posición p; true si se pudo
+func _stash_aplicar(p: Int, l: [String]) -> Bool
+    w = l[p][41:81]
+    var pw: [String] = padres_de(w)
+    h = head_id()
+    if pw.length < 1 or h == ""
+        aviso("el stash está mal o no hay commits")
+        return false
+    end
+    var cab: [EntradaIndice] = ficheros_de_commit(h)
+    var destino: [EntradaIndice] = []
+    if pw[0] == h
+        destino = ficheros_de_commit(w)
+    else
+        r = fusionar_commits(pw[0], h, w, "stash")
+        if r.error != ""
+            aviso(r.error)
+            return false
+        end
+        if r.conflictos.length > 0
+            aviso("el stash choca con lo que ha cambiado desde entonces; no se aplica:")
+            for c in r.conflictos
+                Print "        " + utf8_to_latin1(c[:str_find(c, "\t")])
+            end
+            return false
+        end
+        for x in r.ficheros
+            if x.etapa == 0
+                destino.push(x)
+            end
+        end
+    end
+    if cab == nil or destino == nil
+        aviso("falta algún objeto")
+        return false
+    end
+    if not cambiar_arbol(cab, destino)
+        return false
+    end
+    # como git: los cambios quedan sin preparar; lo nuevo, añadido; lo borrado, borrado solo del disco
+    var idx: [EntradaIndice] = indice_leer()
+    var en_cab: {String: Int} = _mapa(cab)
+    var en_idx: {String: Int} = _mapa(idx)
+    var final: [EntradaIndice] = []
+    for x in idx
+        q = en_cab.get(x.ruta, 0)
+        if q > 0 and cab[q - 1].id != x.id
+            final.push(entrada_de_commit(cab[q - 1], idx))
+        else
+            final.push(x)
+        end
+    end
+    for c in cab
+        if en_idx.get(c.ruta, 0) == 0
+            final.push(entrada_de_commit(c, idx))
+        end
+    end
+    indice_escribir(final)
+    return true
+end
+
+# stash [push [-m mensaje]] | list | apply [n] | pop [n] | drop [n]
+func orden_stash(args: [String])
+    que = "push"
+    i = 0
+    if args.length > 0 and not str_starts(args[0], "-")
+        que = args[0]
+        i = 1
+    end
+    if que == "push" or que == "save"
+        mensaje = ""
+        while i < args.length
+            if (args[i] == "-m" or args[i] == "--message") and i + 1 < args.length
+                mensaje = args[i + 1]
+                i = i + 1
+            elif que == "save"
+                mensaje = args[i]
+            end
+            i = i + 1
+        end
+        _stash_push(mensaje)
+        return
+    end
+    var l: [String] = _stash_lineas()
+    if que == "list"
+        k = l.length - 1
+        while k >= 0
+            tab = str_find(l[k], "\t")
+            Print "stash@{#{l.length - 1 - k}}: " + a_latin1(l[k][tab + 1:])
+            k = k - 1
+        end
+        return
+    end
+    if que != "apply" and que != "pop" and que != "drop"
+        aviso("uso: stash [push [-m mensaje] | list | apply | pop | drop] [stash@{n}]")
+        return
+    end
+    if l.length == 0
+        aviso("no hay nada guardado con stash")
+        return
+    end
+    p = l.length - 1
+    if i < args.length
+        p = _stash_num(args[i], l.length)
+        if p < 0
+            aviso("no existe " + args[i])
+            return
+        end
+    end
+    if que != "drop"
+        if not _stash_aplicar(p, l)
+            return
+        end
+        if que == "apply"
+            return
+        end
+    end
+    w = l[p][41:81]
+    l.remove(p)
+    if not _stash_escribir(l)
+        aviso("no se pudo escribir refs/stash")
+        return
+    end
+    Print "Quitado stash@{#{l.length - p}} (" + w[:7] + ")"
+end

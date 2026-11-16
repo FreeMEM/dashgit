@@ -30,7 +30,7 @@ func uso()
     Print "  dashgit rm [-r] [-f] [--cached] fichero..."
     Print "  dashgit status [-s | --porcelain] [-b]"
     Print "  dashgit check-ignore ruta..."
-    Print "  dashgit commit [-a] -m mensaje"
+    Print "  dashgit commit [-a] [--amend] -m mensaje"
     Print "  dashgit log [--oneline | --format=...] [-n N] [desde] [-- ruta...]"
     Print "  dashgit show [--format=...] [--name-status] [commit | commit:ruta]"
     Print "  dashgit branch [-d] [rama [desde]] | --show-current"
@@ -38,6 +38,7 @@ func uso()
     Print "  dashgit diff [--cached] [commit [commit]] [--name-status | --numstat | --rangos | -U n] [-- fichero...]"
     Print "  dashgit reset [--soft] [commit] [-- fichero...]"
     Print "  dashgit restore [--staged] fichero..."
+    Print "  dashgit stash [push [-m mensaje] | list | apply | pop | drop] [stash@{n}]"
     Print "  dashgit merge (rama | --abort)"
     Print "  dashgit merge-base commit commit"
     Print "  dashgit clone url [cajón]"
@@ -225,7 +226,7 @@ Main
             orden_cat_file(args)
         elif orden == "config"
             orden_config(args)
-        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore" or orden == "show" or orden == "reset" or orden == "restore"
+        elif orden == "add" or orden == "rm" or orden == "status" or orden == "commit" or orden == "log" or orden == "branch" or orden == "checkout" or orden == "diff" or orden == "merge" or orden == "merge-base" or orden == "check-ignore" or orden == "show" or orden == "reset" or orden == "restore" or orden == "stash"
             if necesita_repo()
                 if orden == "add"
                     orden_add(args)
@@ -253,6 +254,8 @@ Main
                     orden_reset(args)
                 elif orden == "restore"
                     orden_restore(args)
+                elif orden == "stash"
+                    orden_stash(args)
                 else
                     orden_checkout(args)
                 end
