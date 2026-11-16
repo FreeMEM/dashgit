@@ -58,8 +58,11 @@ veces: con y sin -m), apply sobre otro commit; el git del PC comprueba la lista,
 - 2026-11-16: `diff HEAD` sin commits: HEAD es el árbol vacío (Forja lo pide para un repositorio recién hecho).
   `add -- ruta` daba un aviso y código 10 por el `--` (Forja lo usa): arreglado, con su prueba en salidas.sh.
 - 2026-11-16: `commit --amend` y `stash`. `tests/stash.sh`: TODO BIEN.
-- Tiempos (Forja, A1200 emulado a toda velocidad): `status --porcelain -b` y `diff --rangos` de un fichero de un
-  repositorio de 4 ficheros, 1,1 s cada uno, casi todo arrancar dashgit (390 KB). Ver la bitácora de Forja.
+- Tiempos (desde Forja, repositorio de 4 ficheros, 68020 a velocidad de A1200 emulado): `status --porcelain -b`
+  1,1 s y `diff --rangos` 0,8 s, casi todo arrancar dashgit (390 KB). Ver la bitácora de Forja.
+- 2026-11-16: todas las pruebas sin red, otra vez tras amend y stash: fase1, fase2, diff, fase3, fusion, raros,
+  arreglos, salidas y stash, TODO BIEN. `tests/fase4.sh` (red) no se ha vuelto a pasar: el cerrojo de red lo tenían
+  otras sesiones. Lo de red no se tocó, salvo el orden de las ramas (texto_antes) y `rev_commit` en `branch`.
 
 ## Falta
 
