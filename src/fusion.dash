@@ -373,7 +373,7 @@ func fusionar_commits(base: String, nuestro: String, suyo: String, nombre_suyo: 
     _juntar_rutas(f_base, rutas, vistas)
     _juntar_rutas(f_nuestro, rutas, vistas)
     _juntar_rutas(f_suyo, rutas, vistas)
-    rutas.sort(fn(x, y) -> x < y)
+    rutas.sort(texto_antes)
     for ruta in rutas
         ib = ""
         inn = ""

@@ -273,3 +273,44 @@ func commit_crear(arbol: String, padres: [String], firma: String, mensaje: Strin
     t = t + "author " + firma + "\ncommitter " + firma + "\n\n" + m
     return objeto_escribir_texto("commit", t)
 end
+
+# Los padres de un commit por su id (lista vacía si no se puede leer)
+func padres_de(id: String) -> [String]
+    var r: [String] = []
+    o = objeto_leer(id)
+    if o != nil
+        r = commit_padres(o)
+        objeto_libre(o)
+    end
+    return r
+end
+
+# El id de lo que hay en ruta (de git: "src/a.dash", "" el árbol entero) dentro del árbol id; "" si no está
+func id_en_arbol(id: String, ruta: String) -> String
+    if ruta == "" or id == ""
+        return id
+    end
+    actual = id
+    var partes: [String] = str_split(ruta, "/")
+    for p in partes
+        o = objeto_leer(actual)
+        if o == nil or o.tipo != "tree"
+            objeto_libre(o)
+            return ""
+        end
+        var es: [Entrada] = arbol_leer(o)
+        objeto_libre(o)
+        siguiente = ""
+        for e in es
+            if e.nombre == p
+                siguiente = e.id
+                break
+            end
+        end
+        if siguiente == ""
+            return ""
+        end
+        actual = siguiente
+    end
+    return actual
+end

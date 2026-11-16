@@ -199,3 +199,8 @@ func texto_a_trozo(s: String) -> Trozo
     end
     return t
 end
+
+# Para ordenar textos (sort con una lambda sin tipos los comparaba mal)
+func texto_antes(a: String, b: String) -> Bool
+    return a < b
+end

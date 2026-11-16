@@ -1,0 +1,6 @@
+# Ayuda de las pruebas: borra el fichero arg(0) (el sistema de pruebas no trae C:Delete)
+Main
+    if not file_delete(arg(0))
+        Print "borra: no se pudo borrar " + arg(0)
+    end
+end

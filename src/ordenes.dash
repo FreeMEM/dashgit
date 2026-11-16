@@ -403,11 +403,39 @@ func _linea(corto: Bool, xy: String, largo: String, ruta: String) -> String
     return largo + ruta
 end
 
+# Lo que va tras "## " en status -sb, como git: "main", "No commits yet on main", "HEAD (no branch)", y la rama
+# del remoto que sigue si está ("main...origin/main")
+func linea_de_rama() -> String
+    rama = head_rama()
+    if rama == ""
+        return "HEAD (no branch)"
+    end
+    nombre = rama[11:]
+    if head_id() == ""
+        return "No commits yet on " + nombre
+    end
+    remoto = config_leer("branch." + nombre + ".remote")
+    mezcla = config_leer("branch." + nombre + ".merge")
+    if remoto != "" and str_starts(mezcla, "refs/heads/")
+        sigue = "refs/remotes/" + remoto + "/" + mezcla[11:]
+        if ref_leer(sigue) != ""
+            return nombre + "..." + sigue[13:]
+        end
+    end
+    return nombre
+end
+
 func orden_status(args: [String])
     corto = false
+    con_rama = false
     for a in args
-        if a == "-s" or a == "--short" or a == "--porcelain"
+        if a == "-s" or a == "--short" or a == "--porcelain" or a == "--porcelain=v1"
             corto = true
+        elif a == "-b" or a == "--branch"
+            con_rama = true
+        elif a == "-sb" or a == "-bs"
+            corto = true
+            con_rama = true
         end
     end
     e = estado(corto)
@@ -415,14 +443,46 @@ func orden_status(args: [String])
         return
     end
     if corto
+        if con_rama
+            Print "## " + linea_de_rama()
+        end
+        # como git: una línea por fichero con las dos letras (índice y árbol de trabajo), por orden de ruta, y los
+        # que no se siguen al final
+        var xy: {String: String} = {}
+        var rutas: [String] = []
+        var todas: [String] = []
         for l in e.conflictos
-            Print utf8_to_latin1(l)
+            todas.push(l)
         end
         for l in e.preparados
-            Print utf8_to_latin1(l)
+            todas.push(l)
         end
         for l in e.sin_preparar
-            Print utf8_to_latin1(l)
+            todas.push(l)
+        end
+        for l in todas
+            if true
+                r = l[3:]
+                antes = xy.get(r, "")
+                if antes == ""
+                    rutas.push(r)
+                    xy[r] = l[:2]
+                else
+                    x = antes[:1]
+                    if x == " "
+                        x = l[:1]
+                    end
+                    y = antes[1:2]
+                    if y == " "
+                        y = l[1:2]
+                    end
+                    xy[r] = x + y
+                end
+            end
+        end
+        rutas.sort(texto_antes)
+        for r in rutas
+            Print utf8_to_latin1(xy[r] + " " + r)
         end
         for l in e.nuevos
             Print utf8_to_latin1(l)
@@ -644,28 +704,284 @@ func _add_seguidos(idx: [EntradaIndice]) -> Bool
     return indice_escribir(idx)
 end
 
+# ---- nombres de commits: HEAD~2, main^, HEAD^2, a..b ----
+
+# Un nombre con ~n, ^ o ^n detrás (HEAD~2, main^, HEAD^2) a un commit; "" si no
+func rev_commit(nombre: String) -> String
+    corte = -1
+    i = 0
+    while i < nombre.length
+        c = nombre[i:i + 1]
+        if c == "~" or c == "^"
+            corte = i
+            break
+        end
+        i = i + 1
+    end
+    if corte < 0
+        return resolver_commit(nombre)
+    end
+    id = resolver_commit(nombre[:corte])
+    resto = nombre[corte:]
+    while resto != "" and id != ""
+        op = resto[:1]
+        resto = resto[1:]
+        if op != "~" and op != "^"
+            return ""
+        end
+        j = 0
+        while j < resto.length and str_code(resto, j) >= 48 and str_code(resto, j) <= 57
+            j = j + 1
+        end
+        n = 1
+        if j > 0
+            n = str_to_int(resto[:j], 10)
+            resto = resto[j:]
+        end
+        if op == "~"
+            while n > 0 and id != ""
+                var ps: [String] = padres_de(id)
+                id = ""
+                if ps.length > 0
+                    id = ps[0]
+                end
+                n = n - 1
+            end
+        elif n > 0
+            var ps2: [String] = padres_de(id)
+            id = ""
+            if n <= ps2.length
+                id = ps2[n - 1]
+            end
+        end
+    end
+    return id
+end
+
 # ---- log ----
 
+# Lo que va en cada placeholder de --format (como git): %H %h %T %t %P %p %an %ae %ad %ai %as %at %cn %ce %cd %ci
+# %cs %ct %s %b %B %n %% %xNN. Las fechas %ad y %cd van como %ai ("2026-11-04 12:30:05 +0100").
+func formato_commit(f: String, id: String, o: Objeto) -> String
+    r = ""
+    i = 0
+    n = f.length
+    while i < n
+        c = f[i:i + 1]
+        if c != "%" or i + 1 >= n
+            r = r + c
+            i = i + 1
+            continue
+        end
+        k = f[i + 1:i + 2]
+        i = i + 2
+        if k == "%"
+            r = r + "%"
+        elif k == "n"
+            r = r + "\n"
+        elif k == "H"
+            r = r + id
+        elif k == "h"
+            r = r + id[:7]
+        elif k == "T"
+            r = r + commit_campo(o, "tree")
+        elif k == "t"
+            r = r + commit_campo(o, "tree")[:7]
+        elif k == "P" or k == "p"
+            primero = true
+            for pp in commit_padres(o)
+                if not primero
+                    r = r + " "
+                end
+                primero = false
+                if k == "P"
+                    r = r + pp
+                else
+                    r = r + pp[:7]
+                end
+            end
+        elif k == "s" or k == "b" or k == "B"
+            msg = commit_mensaje(o)
+            nl = str_find(msg, "\n")
+            if k == "s"
+                if nl >= 0
+                    msg = msg[:nl]
+                end
+                r = r + msg
+            elif k == "b"
+                fin = str_find(msg, "\n\n")
+                if fin >= 0
+                    r = r + str_trim(msg[fin + 2:]) + "\n"
+                end
+            else
+                r = r + msg
+            end
+        elif (k == "a" or k == "c") and i < n
+            q = f[i:i + 1]
+            i = i + 1
+            firma = commit_campo(o, "author")
+            if k == "c"
+                firma = commit_campo(o, "committer")
+            end
+            r = r + _de_firma(firma, q)
+        elif k == "x" and i + 1 < n
+            v = str_to_int(f[i:i + 2], 16)
+            i = i + 2
+            if v > 0
+                r = r + str_char(v)
+            end
+        else
+            r = r + "%" + k
+        end
+    end
+    return r
+end
+
+# Un trozo de una firma ("Nombre <correo> 1730720000 +0100"): n nombre, e correo, t segundos, d/i fecha, s día
+func _de_firma(firma: String, q: String) -> String
+    a = str_find(firma, " <")
+    b = str_find(firma, ">")
+    if q == "n"
+        if a < 0
+            return firma
+        end
+        return firma[:a]
+    end
+    if q == "e"
+        if a < 0 or b < a
+            return ""
+        end
+        return firma[a + 2:b]
+    end
+    if b < 0
+        return ""
+    end
+    var p: [String] = str_split(str_trim(firma[b + 1:]), " ")
+    if q == "t"
+        if p.length < 1
+            return ""
+        end
+        return p[0]
+    end
+    fecha = firma_fecha(firma)
+    if q == "s"
+        return fecha[:10]
+    end
+    return fecha
+end
+
+# Las opciones de formato de log y show: --oneline, --format=..., --pretty=...; true si a era una
+var log_corto: Bool = false
+var log_formato: String = ""
+var log_con_formato: Bool = false
+
+func opcion_formato(a: String) -> Bool
+    if a == "--oneline"
+        log_corto = true
+    elif a == "--pretty=oneline"
+        log_con_formato = true
+        log_formato = "%H %s"
+    elif a == "--pretty=short" or a == "--pretty=medium" or a == "--pretty"
+        log_corto = false
+        log_con_formato = false
+    elif str_starts(a, "--format=")
+        log_con_formato = true
+        log_formato = a[9:]
+    elif str_starts(a, "--pretty=format:")
+        log_con_formato = true
+        log_formato = a[16:]
+    elif str_starts(a, "--pretty=tformat:")
+        log_con_formato = true
+        log_formato = a[17:]
+    else
+        return false
+    end
+    return true
+end
+
+# Escribe un commit como lo hace log (con las opciones de formato de arriba)
+func escribir_commit(id: String, o: Objeto)
+    if log_con_formato
+        if log_formato != ""
+            Print a_latin1(formato_commit(log_formato, id, o))
+        end
+        return
+    end
+    msg = a_latin1(commit_mensaje(o))
+    if log_corto
+        nl = str_find(msg, "\n")
+        if nl >= 0
+            msg = msg[:nl]
+        end
+        Print id[:7] + " " + msg
+        return
+    end
+    Print "commit " + id
+    var ps0: [String] = commit_padres(o)
+    if ps0.length > 1
+        l = "Merge:"
+        for pp in ps0
+            l = l + " " + pp[:7]
+        end
+        Print l
+    end
+    autor = commit_campo(o, "author")
+    Print "Autor: " + a_latin1(firma_quien(autor))
+    Print "Fecha: " + firma_fecha(autor)
+    Print ""
+    for l in str_split(str_trim(msg), "\n")
+        Print "    " + l
+    end
+    Print ""
+end
+
+# Los ids de esas rutas en un commit, juntos (para ver si un commit las cambia); con caché
+func _ids_rutas(id: String, rutas: [String], cache: {String: String}) -> String
+    hecho = cache.get(id, "?")
+    if hecho != "?"
+        return hecho
+    end
+    arbol = commit_arbol(id)
+    r = ""
+    for x in rutas
+        r = r + id_en_arbol(arbol, x) + "|"
+    end
+    cache[id] = r
+    return r
+end
+
 func orden_log(args: [String])
-    corto = false
+    log_corto = false
+    log_con_formato = false
     max = -1
     desde = "HEAD"
+    var rutas: [String] = []
+    rutas_ya = false
     i = 0
     while i < args.length
         a = args[i]
-        if a == "--oneline"
-            corto = true
+        if rutas_ya
+            rutas.push(ruta_git(a))
+        elif a == "--"
+            rutas_ya = true
+        elif opcion_formato(a)
+            # hecho
         elif a == "-n" and i + 1 < args.length
             max = Int(args[i + 1])
             i = i + 1
+        elif str_starts(a, "--max-count=")
+            max = str_to_int(a[12:], 10)
         elif str_starts(a, "-") and a.length > 1 and str_to_int(a[1:], 10) > 0
             max = str_to_int(a[1:], 10)
+        elif rev_commit(a) == "" and a != "HEAD" and ruta_git(a) != "?"
+            # como git: lo que no es un commit es una ruta
+            rutas.push(ruta_git(a))
         else
             desde = a
         end
         i = i + 1
     end
-    id = resolver_commit(desde)
+    id = rev_commit(desde)
     if id == ""
         if desde == "HEAD"
             Print "Aún no hay commits"
@@ -675,7 +991,9 @@ func orden_log(args: [String])
         return
     end
     # todos los commits (de todos los padres), del más nuevo al más viejo por la fecha del committer, como git log:
-    # se saca siempre el pendiente más nuevo (a igual fecha, el que entró antes)
+    # se saca siempre el pendiente más nuevo (a igual fecha, el que entró antes). Con rutas, solo los que las
+    # cambian; de una fusión que deja una igual que uno de sus padres, se sigue solo ese padre (como git)
+    var cache: {String: String} = {}
     var pendientes: [String] = [id]
     var fechas: [Int] = [_fecha_commit(id)]
     var vistos_ids: {String: Int} = {}
@@ -698,33 +1016,31 @@ func orden_log(args: [String])
             aviso("falta el commit " + id)
             return
         end
-        msg = a_latin1(commit_mensaje(o))
-        if corto
-            nl = str_find(msg, "\n")
-            if nl >= 0
-                msg = msg[:nl]
-            end
-            Print id[:7] + " " + msg
-        else
-            Print "commit " + id
-            var ps0: [String] = commit_padres(o)
-            if ps0.length > 1
-                l = "Merge:"
-                for pp in ps0
-                    l = l + " " + pp[:7]
-                end
-                Print l
-            end
-            autor = commit_campo(o, "author")
-            Print "Autor: " + a_latin1(firma_quien(autor))
-            Print "Fecha: " + firma_fecha(autor)
-            Print ""
-            for l in str_split(str_trim(msg), "\n")
-                Print "    " + l
-            end
-            Print ""
-        end
         var ps: [String] = commit_padres(o)
+        mostrar = true
+        if rutas.length > 0
+            mio = _ids_rutas(id, rutas, cache)
+            if ps.length == 0
+                vacio = ""
+                for x in rutas
+                    vacio = vacio + "|"
+                end
+                mostrar = mio != vacio
+            else
+                for pp in ps
+                    if _ids_rutas(pp, rutas, cache) == mio
+                        mostrar = false
+                        var uno: [String] = [pp]
+                        ps = uno
+                        break
+                    end
+                end
+            end
+        end
+        if mostrar
+            escribir_commit(id, o)
+            vistos = vistos + 1
+        end
         objeto_libre(o)
         for pp in ps
             if vistos_ids.get(pp, 0) == 0
@@ -733,7 +1049,6 @@ func orden_log(args: [String])
                 fechas.push(_fecha_commit(pp))
             end
         end
-        vistos = vistos + 1
     end
 end
 
@@ -778,7 +1093,7 @@ func ramas() -> [String]
             end
         end
     end
-    r.sort(fn(a, b) -> a < b)
+    r.sort(texto_antes)
     return r
 end
 
@@ -801,7 +1116,15 @@ func _ramas_en(rel: String, r: [String])
 end
 
 func orden_branch(args: [String])
-    if args.length == 0
+    if args.length == 1 and args[0] == "--show-current"
+        # la rama actual (nada con HEAD suelto), como git
+        rama = head_rama()
+        if rama != ""
+            Print rama[11:]
+        end
+        return
+    end
+    if args.length == 0 or (args.length == 1 and (args[0] == "--list" or args[0] == "-l"))
         actual = head_rama()
         for b in ramas()
             if "refs/heads/" + b == actual
@@ -843,7 +1166,7 @@ func orden_branch(args: [String])
         aviso("ya existe la rama " + n)
         return
     end
-    id = resolver_commit(desde)
+    id = rev_commit(desde)
     if id == ""
         aviso("no hay commit en " + desde)
         return
@@ -1115,5 +1438,170 @@ func orden_checkout(args: [String])
     else
         file_write_text(git_dir + "/HEAD", id + "\n")
         Print "HEAD suelto en " + id[:7]
+    end
+end
+
+# ---- reset y restore ----
+
+# El tamaño de un objeto (para el índice); -1 si no se puede leer
+func _tam_objeto(id: String) -> Int
+    o = objeto_leer(id)
+    if o == nil
+        return -1
+    end
+    n = o.n
+    objeto_libre(o)
+    return n
+end
+
+# Una entrada del índice para lo que hay en un commit: si el índice ya tenía ese mismo contenido, con sus datos
+# del disco; si no, con su tamaño y sin fecha (status lo vuelve a mirar)
+func _entrada_de(c: EntradaIndice, viejo: [EntradaIndice]) -> EntradaIndice
+    p = indice_buscar(viejo, c.ruta)
+    if p >= 0 and viejo[p].id == c.id and viejo[p].etapa == 0
+        x = viejo[p]
+        x.modo = c.modo
+        return x
+    end
+    e = EntradaIndice()
+    e.ruta = c.ruta
+    e.id = c.id
+    e.modo = c.modo
+    e.tam = _tam_objeto(c.id)
+    return e
+end
+
+# reset [--soft | --mixed] [commit] [--] [ruta...]: con rutas, las devuelve en el índice a como están en el commit
+# (HEAD si no se dice): quita del índice lo añadido sin tocar el disco. Sin rutas, todo el índice; con un commit,
+# además lleva la rama allí (--soft: solo la rama).
+func orden_reset(args: [String])
+    blando = false
+    desde = ""
+    var filtro: [String] = []
+    rutas_ya = false
+    for a in args
+        if rutas_ya
+            filtro.push(ruta_git(a))
+        elif a == "--"
+            rutas_ya = true
+        elif a == "--soft"
+            blando = true
+        elif a == "--mixed" or a == "-q" or a == "--quiet"
+            # lo de siempre
+        elif a == "--hard" or a == "--keep" or a == "--merge"
+            aviso("reset " + a + " aún no está: usa dashgit checkout -- fichero para deshacer los cambios del disco")
+            return
+        elif desde == "" and filtro.length == 0 and rev_commit(a) != ""
+            desde = a
+        else
+            filtro.push(ruta_git(a))
+        end
+    end
+    for r in filtro
+        if r == "?"
+            aviso("una ruta está fuera del repositorio")
+            return
+        end
+    end
+    id = head_id()
+    if desde != ""
+        id = rev_commit(desde)
+    end
+    if desde != "" and filtro.length > 0 and blando
+        aviso("reset --soft no admite rutas")
+        return
+    end
+    var cab: [EntradaIndice] = ficheros_de_commit(id)
+    if cab == nil
+        aviso("falta algún objeto del commit " + id)
+        return
+    end
+    var idx: [EntradaIndice] = indice_leer()
+    if idx == nil
+        aviso(indice_error)
+        return
+    end
+    if filtro.length == 0
+        if blando
+            if desde == ""
+                return
+            end
+        else
+            var nuevo: [EntradaIndice] = []
+            for c in cab
+                nuevo.push(_entrada_de(c, idx))
+            end
+            if not indice_escribir(nuevo)
+                aviso("no se pudo escribir el índice")
+                return
+            end
+        end
+        if desde != "" and id != head_id()
+            rama = head_rama()
+            if rama == ""
+                file_write_text(git_dir + "/HEAD", id + "\n")
+            else
+                ref_escribir(rama, id)
+            end
+            file_delete(git_dir + "/MERGE_HEAD")
+            file_delete(git_dir + "/MERGE_MSG")
+        end
+        return
+    end
+    # solo esas rutas: fuera del índice lo que hay de ellas, y dentro lo del commit
+    var resultado: [EntradaIndice] = []
+    for e in idx
+        dentro = false
+        for r in filtro
+            if dentro_de(e.ruta, r)
+                dentro = true
+            end
+        end
+        if not dentro
+            resultado.push(e)
+        end
+    end
+    for c in cab
+        for r in filtro
+            if dentro_de(c.ruta, r)
+                resultado.push(_entrada_de(c, idx))
+                break
+            end
+        end
+    end
+    if not indice_escribir(resultado)
+        aviso("no se pudo escribir el índice")
+    end
+end
+
+# restore [--staged] [--] ruta...: --staged es reset de esas rutas; sin él, checkout -- ruta
+func orden_restore(args: [String])
+    preparado = false
+    var resto: [String] = []
+    for a in args
+        if a == "--staged" or a == "-S"
+            preparado = true
+        elif a == "--worktree" or a == "-W"
+            # lo de siempre
+        elif a != "--"
+            resto.push(a)
+        end
+    end
+    if resto.length == 0
+        aviso("uso: restore [--staged] fichero...")
+        return
+    end
+    if preparado
+        var r: [String] = ["--"]
+        for x in resto
+            r.push(x)
+        end
+        orden_reset(r)
+    else
+        var c: [String] = ["--"]
+        for x in resto
+            c.push(x)
+        end
+        orden_checkout(c)
     end
 end
