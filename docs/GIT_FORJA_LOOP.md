@@ -33,6 +33,19 @@ del PC y compara: status (limpio, con MM, AM, D, ??), branch, diff con las cuatr
 (sacado de los `@@` de `git diff -U0`), `diff HEAD`, y sobre el repositorio del Amiga: `log --format` con todos los
 campos, `log -- fichero`, `log -- cajón`, `show` (formato, cambios, `commit:ruta`), diff entre commits, reset y restore.
 
+Y para cambiar de rama con cambios a medias y rehacer el último commit:
+
+- `commit --amend [-m mensaje]`: rehace el commit de HEAD con lo que hay en el índice, con sus mismos padres y su
+  autor (el committer es el de ahora); sin `-m`, con su mensaje.
+- `stash [push [-m mensaje]] | list | apply | pop | drop [stash@{n}]`, como el de git: `refs/stash` apunta a un commit
+  W (los ficheros seguidos tal como están en el disco) con dos padres, HEAD y un commit I con el índice; la lista va
+  en `logs/refs/stash`. El git del PC la lee (`git stash list`, `git stash show`). `apply` sobre otro commit hace una
+  fusión de tres vías; si choca con algo, no aplica nada y lo dice. Como en git, lo aplicado queda sin preparar (lo
+  nuevo, añadido). Lo que no se sigue no se guarda (git tampoco, sin `-u`).
+
+Prueba: `tests/stash.sh [DASH_DIR]`: push con un cambio sin preparar y otro preparado, list, pop, commit --amend (dos
+veces: con y sin -m), apply sobre otro commit; el git del PC comprueba la lista, W, I, la historia y `git fsck`.
+
 ## Bitácora
 
 - 2026-11-16: todo lo de arriba. `tests/salidas.sh`: TODO BIEN en el A1200 emulado (3.1). Las demás pruebas siguen
@@ -42,8 +55,14 @@ campos, `log -- fichero`, `log -- cajón`, `show` (formato, cambios, `commit:rut
   estaba). Con una función con tipos (`texto_antes(a: String, b: String) -> Bool`, util.dash) sí. dashgit lo usaba
   en las ramas, en las rutas de una fusión y en `diff --cached`: cambiado en los tres sitios.
 
+- 2026-11-16: `diff HEAD` sin commits: HEAD es el árbol vacío (Forja lo pide para un repositorio recién hecho).
+  `add -- ruta` daba un aviso y código 10 por el `--` (Forja lo usa): arreglado, con su prueba en salidas.sh.
+- 2026-11-16: `commit --amend` y `stash`. `tests/stash.sh`: TODO BIEN.
+- Tiempos (Forja, A1200 emulado a toda velocidad): `status --porcelain -b` y `diff --rangos` de un fichero de un
+  repositorio de 4 ficheros, 1,1 s cada uno, casi todo arrancar dashgit (390 KB). Ver la bitácora de Forja.
+
 ## Falta
 
 - `status -b` no dice cuántos commits va por delante o por detrás del remoto (`[ahead 1]`).
-- `reset --hard`, `commit --amend`, `stash`, `tag`, `remote`.
+- `reset --hard`, `stash -u` (lo no seguido), `stash show`, `tag`, `remote`.
 - `show` de una fusión no enseña el diff combinado de git.
