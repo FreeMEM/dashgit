@@ -39,7 +39,7 @@ fallos=0
 mira() { # nombre esperado fichero
   if [ "$(cat "$d/$3" 2>/dev/null)" = "$2" ]; then echo "bien $1"; else echo "FALLO $1: $(cat "$d/$3" 2>/dev/null | head -3)"; fallos=$((fallos+1)); fi
 }
-head -1 "$d/r_uso.txt" | grep -q "dashgit 0.1" && echo "bien uso" || { echo "FALLO uso"; fallos=$((fallos+1)); }
+head -1 "$d/r_uso.txt" | grep -q "dashgit 0.2" && echo "bien uso" || { echo "FALLO uso"; fallos=$((fallos+1)); }
 grep -q "Repositorio vacío creado" "$d/r_init.txt" 2>/dev/null || iconv -f latin1 -t utf-8 "$d/r_init.txt" | grep -q "Repositorio vacío creado" && echo "bien init" || { echo "FALLO init: $(cat "$d/r_init.txt")"; fallos=$((fallos+1)); }
 grep -q "otra vez" "$d/r_init2.txt" && echo "bien init otra vez" || { echo "FALLO init otra vez"; fallos=$((fallos+1)); }
 mira hash "$h" r_hash.txt

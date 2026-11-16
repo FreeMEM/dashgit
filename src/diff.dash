@@ -3,7 +3,7 @@
 
 import "ordenes.dash"
 
-const CONTEXTO = 3
+var contexto: Int = 3      # las líneas iguales alrededor de cada trozo (-U)
 const MAX_CELDAS = 400000   # tope de la tabla del LCS (2 bytes cada celda)
 
 # Las líneas de un blob ("" de id: ninguna); nil si es binario
@@ -170,8 +170,8 @@ func escribir_trozos(a: [String], b: [String])
         if k >= total
             return
         end
-        # el trozo empieza CONTEXTO antes y acaba cuando hay más de 2*CONTEXTO iguales seguidas
-        ini = k - CONTEXTO
+        # el trozo empieza contexto antes y acaba cuando hay más de 2*contexto iguales seguidas
+        ini = k - contexto
         if ini < 0
             ini = 0
         end
@@ -180,7 +180,7 @@ func escribir_trozos(a: [String], b: [String])
         while fin < total
             if ops[fin] == " "
                 iguales = iguales + 1
-                if iguales > 2 * CONTEXTO
+                if iguales > 2 * contexto
                     fin = fin + 1
                     break
                 end
@@ -189,7 +189,7 @@ func escribir_trozos(a: [String], b: [String])
             end
             fin = fin + 1
         end
-        fin = fin - iguales + CONTEXTO
+        fin = fin - iguales + contexto
         if fin > total
             fin = total
         end
@@ -284,75 +284,377 @@ func diff_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_b:
     escribir_trozos(a, b)
 end
 
+# Cómo sale cada fichero que cambia: el parche, solo su nombre, su letra (A, M, D) y nombre, cuántas líneas se
+# añaden y se quitan, o los rangos de líneas cambiadas (para el margen de un editor, ver diff_rangos)
+const D_PARCHE = 0
+const D_NOMBRES = 1
+const D_LETRAS = 2
+const D_CUENTAS = 3
+const D_RANGOS = 4
+var diff_modo: Int = 0
+
+# Las líneas de los dos lados de un fichero (nil si es binario)
+var _la: [String] = []
+var _lb: [String] = []
+
+func _lados(ruta: String, id_a: String, id_b: String, en_trabajo: Bool)
+    _la = lineas_de(id_a)
+    if en_trabajo
+        _lb = lineas_de_fichero(ruta)
+    else
+        _lb = lineas_de(id_b)
+    end
+end
+
+# Un fichero que cambia, como pide diff_modo
+func cambio_fichero(ruta: String, id_a: String, modo_a: Int, id_b: String, modo_b: Int, en_trabajo: Bool)
+    nombre = utf8_to_latin1(ruta)
+    if diff_modo == D_PARCHE
+        diff_fichero(ruta, id_a, modo_a, id_b, modo_b, en_trabajo)
+    elif diff_modo == D_NOMBRES
+        Print nombre
+    elif diff_modo == D_LETRAS
+        letra = "M"
+        if id_a == ""
+            letra = "A"
+        elif id_b == "" and not en_trabajo
+            letra = "D"
+        end
+        Print letra + "\t" + nombre
+    elif diff_modo == D_CUENTAS
+        _lados(ruta, id_a, id_b, en_trabajo)
+        if _la == nil or _lb == nil
+            Print "-\t-\t" + nombre
+        else
+            mas = 0
+            menos = 0
+            for op in operaciones(_la, _lb)
+                if op == "+"
+                    mas = mas + 1
+                elif op == "-"
+                    menos = menos + 1
+                end
+            end
+            Print str_from_int(mas, 10) + "\t" + str_from_int(menos, 10) + "\t" + nombre
+        end
+    else
+        diff_rangos(ruta, id_a, id_b, en_trabajo)
+    end
+end
+
+# --rangos: "F ruta" y una línea por cada trozo que cambia, con la línea del lado nuevo donde empieza (desde 1) y
+# cuántas son: "A n c" añadidas, "C n c" cambiadas, "B n c" c líneas quitadas justo antes de la n (n puede ser la
+# última + 1). Un trozo con q quitadas y p puestas da min(q, p) cambiadas y el resto añadidas o quitadas.
+# Un fichero binario da "F ruta" y "X".
+func diff_rangos(ruta: String, id_a: String, id_b: String, en_trabajo: Bool)
+    _lados(ruta, id_a, id_b, en_trabajo)
+    Print "F " + utf8_to_latin1(ruta)
+    if _la == nil or _lb == nil
+        Print "X"
+        return
+    end
+    var ops: [String] = operaciones(_la, _lb)
+    total = ops.length
+    linea = 1     # la línea del lado nuevo por la que va
+    k = 0
+    while k < total
+        if ops[k] == " "
+            linea = linea + 1
+            k = k + 1
+            continue
+        end
+        quitadas = 0
+        puestas = 0
+        while k < total and ops[k] != " "
+            if ops[k] == "-"
+                quitadas = quitadas + 1
+            else
+                puestas = puestas + 1
+            end
+            k = k + 1
+        end
+        cambiadas = quitadas
+        if puestas < cambiadas
+            cambiadas = puestas
+        end
+        if cambiadas > 0
+            Print "C " + str_from_int(linea, 10) + " " + str_from_int(cambiadas, 10)
+        end
+        if puestas > cambiadas
+            Print "A " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(puestas - cambiadas, 10)
+        elif quitadas > cambiadas
+            Print "B " + str_from_int(linea + cambiadas, 10) + " " + str_from_int(quitadas - cambiadas, 10)
+        end
+        linea = linea + puestas
+    end
+end
+
+# El id de lo que hay en el disco de un fichero del índice; "" si no está
+func id_en_trabajo(e: EntradaIndice) -> String
+    f = trabajo_mirar(e.ruta)
+    if f.tam < 0
+        return ""
+    end
+    if f.tam == e.tam and f.mtime == e.mtime
+        return e.id
+    end
+    return trabajo_guardar(e.ruta, false)
+end
+
+# Compara dos listas de ficheros (de un commit o del índice) y saca cada uno que cambia. Con b_trabajo, el lado b
+# es lo que hay en el disco de los ficheros de la lista b (los que siguen el índice).
+func diff_listas(a: [EntradaIndice], b: [EntradaIndice], b_trabajo: Bool, filtro: [String])
+    var en_a: {String: Int} = {}
+    var en_b: {String: Int} = {}
+    var rutas: [String] = []
+    i = 0
+    while i < a.length
+        if a[i].etapa == 0
+            en_a[a[i].ruta] = i + 1
+            rutas.push(a[i].ruta)
+        end
+        i = i + 1
+    end
+    i = 0
+    while i < b.length
+        if b[i].etapa == 0
+            en_b[b[i].ruta] = i + 1
+            if en_a.get(b[i].ruta, 0) == 0
+                rutas.push(b[i].ruta)
+            end
+        end
+        i = i + 1
+    end
+    rutas.sort(texto_antes)
+    for r in rutas
+        if _pasa(r, filtro)
+            p = en_a.get(r, 0)
+            q = en_b.get(r, 0)
+            id_a = ""
+            modo_a = 0
+            if p > 0
+                id_a = a[p - 1].id
+                modo_a = a[p - 1].modo
+            end
+            id_b = ""
+            modo_b = 0
+            if q > 0
+                modo_b = b[q - 1].modo
+                if b_trabajo
+                    id_b = id_en_trabajo(b[q - 1])
+                else
+                    id_b = b[q - 1].id
+                end
+            end
+            if id_a != id_b and (id_a != "" or id_b != "")
+                cambio_fichero(r, id_a, modo_a, id_b, modo_b, b_trabajo and id_b != "")
+            end
+        end
+    end
+end
+
+# Las opciones de salida de diff y show; true si a era una
+func opcion_diff(a: String) -> Bool
+    if a == "--name-only"
+        diff_modo = D_NOMBRES
+    elif a == "--name-status"
+        diff_modo = D_LETRAS
+    elif a == "--numstat"
+        diff_modo = D_CUENTAS
+    elif a == "--rangos"
+        diff_modo = D_RANGOS
+    elif a == "-p" or a == "--patch"
+        diff_modo = D_PARCHE
+    elif str_starts(a, "--unified=")
+        contexto = str_to_int(a[10:], 10)
+    elif str_starts(a, "-U") and a.length > 2
+        contexto = str_to_int(a[2:], 10)
+    else
+        return false
+    end
+    if contexto < 0
+        contexto = 0
+    end
+    return true
+end
+
+# diff [--cached] [commit [commit]] [opciones] [--] [ruta...]
+#   sin commits: el índice contra el disco; --cached: HEAD (o el commit) contra el índice; un commit: el commit
+#   contra el disco; dos (o a..b): el uno contra el otro. Opciones: --name-only, --name-status, --numstat, --rangos,
+#   -U n (--unified=n).
 func orden_diff(args: [String])
     preparado = false
+    var revs: [String] = []
     var filtro: [String] = []
+    rutas_ya = false
     for x in args
-        if x == "--cached" or x == "--staged"
+        if rutas_ya
+            filtro.push(ruta_git(x))
+        elif x == "--"
+            rutas_ya = true
+        elif x == "--cached" or x == "--staged"
             preparado = true
-        elif x != "--"
+        elif opcion_diff(x)
+            # hecho
+        elif str_starts(x, "-")
+            aviso("opción desconocida de diff: " + x)
+            return
+        elif revs.length == 0 and str_contains(x, "..") and filtro.length == 0
+            p = str_find(x, "..")
+            ia = x[:p]
+            ib = x[p + 2:]
+            if ia == ""
+                ia = "HEAD"
+            end
+            if ib == ""
+                ib = "HEAD"
+            end
+            revs.push(ia)
+            revs.push(ib)
+        elif revs.length < 2 and filtro.length == 0 and (rev_commit(x) != "" or x == "HEAD")
+            revs.push(x)
+        else
             filtro.push(ruta_git(x))
         end
+    end
+    var ids: [String] = []
+    for r in revs
+        id = rev_commit(r)
+        if id == "" and r == "HEAD" and head_id() == ""
+            # sin commits aún, HEAD es el árbol vacío (como el de git: todo sale como nuevo)
+            ids.push("")
+            continue
+        end
+        if id == ""
+            aviso("no existe " + r)
+            return
+        end
+        ids.push(id)
+    end
+    if ids.length == 2
+        var c1: [EntradaIndice] = ficheros_de_commit(ids[0])
+        var c2: [EntradaIndice] = ficheros_de_commit(ids[1])
+        if c1 == nil or c2 == nil
+            aviso("falta algún objeto")
+            return
+        end
+        diff_listas(c1, c2, false, filtro)
+        return
     end
     var idx: [EntradaIndice] = indice_leer()
     if idx == nil
         aviso(indice_error)
         return
     end
-    if preparado
-        var cab: [EntradaIndice] = ficheros_de_commit(head_id())
-        var en_cab: {String: Int} = {}
-        i = 0
-        while i < cab.length
-            en_cab[cab[i].ruta] = i + 1
-            i = i + 1
+    if preparado or ids.length == 1
+        base = head_id()
+        if ids.length == 1
+            base = ids[0]
         end
-        var en_idx: {String: Int} = {}
-        i = 0
-        while i < idx.length
-            en_idx[idx[i].ruta] = i + 1
-            i = i + 1
+        var cab: [EntradaIndice] = ficheros_de_commit(base)
+        if cab == nil
+            aviso("falta algún objeto del commit " + base)
+            return
         end
-        # recorrer las dos listas en orden
-        var rutas: [String] = []
-        for e in cab
-            rutas.push(e.ruta)
-        end
-        for e in idx
-            if en_cab.get(e.ruta, 0) == 0
-                rutas.push(e.ruta)
-            end
-        end
-        rutas.sort(fn(a, b) -> a < b)
-        for r in rutas
-            if _pasa(r, filtro)
-                p = en_cab.get(r, 0)
-                q = en_idx.get(r, 0)
-                if p == 0
-                    diff_fichero(r, "", 0, idx[q - 1].id, idx[q - 1].modo, false)
-                elif q == 0
-                    diff_fichero(r, cab[p - 1].id, cab[p - 1].modo, "", 0, false)
-                elif cab[p - 1].id != idx[q - 1].id
-                    diff_fichero(r, cab[p - 1].id, cab[p - 1].modo, idx[q - 1].id, idx[q - 1].modo, false)
-                end
-            end
-        end
+        diff_listas(cab, idx, not preparado, filtro)
         return
     end
     # el índice contra el árbol de trabajo
-    for e in idx
-        if _pasa(e.ruta, filtro)
-            f = trabajo_mirar(e.ruta)
-            if f.tam < 0
-                diff_fichero(e.ruta, e.id, e.modo, "", 0, false)
-            elif f.tam != e.tam or f.mtime != e.mtime
-                id = trabajo_guardar(e.ruta, false)
-                if id != e.id
-                    diff_fichero(e.ruta, e.id, e.modo, id, e.modo, true)
-                end
-            end
+    diff_listas(idx, idx, true, filtro)
+end
+
+# show [opciones] [commit] [--] [ruta...]: el commit (como log) y sus cambios frente a su primer padre (una fusión
+# sale sin cambios); show commit:ruta: el contenido de ese fichero en ese commit (la ruta, desde la raíz)
+func orden_show(args: [String])
+    log_corto = false
+    log_con_formato = false
+    diff_modo = D_PARCHE
+    que = ""
+    var filtro: [String] = []
+    rutas_ya = false
+    sin_cambios = false
+    for x in args
+        if rutas_ya
+            filtro.push(ruta_git(x))
+        elif x == "--"
+            rutas_ya = true
+        elif opcion_formato(x) or opcion_diff(x)
+            # hecho
+        elif x == "-s" or x == "--no-patch"
+            sin_cambios = true
+        elif str_starts(x, "-")
+            aviso("opción desconocida de show: " + x)
+            return
+        elif que == ""
+            que = x
+        else
+            filtro.push(ruta_git(x))
         end
     end
+    if que == ""
+        que = "HEAD"
+    end
+    dos = str_find(que, ":")
+    # (un nombre con ":" de unidad del Amiga, "DH0:x", no es un commit: se mira que lo de antes sea un commit)
+    if dos > 0 and rev_commit(que[:dos]) != ""
+        id = rev_commit(que[:dos])
+        ruta = latin1_to_utf8(que[dos + 1:])
+        while str_starts(ruta, "/")
+            ruta = ruta[1:]
+        end
+        obj = id_en_arbol(commit_arbol(id), ruta)
+        if obj == ""
+            aviso(que[dos + 1:] + " no está en " + que[:dos])
+            return
+        end
+        o = objeto_leer(obj)
+        if o == nil
+            aviso("no se puede leer el objeto " + obj)
+            return
+        end
+        if o.tipo == "tree"
+            for e in arbol_leer(o)
+                n = utf8_to_latin1(e.nombre)
+                if e.modo == "40000"
+                    n = n + "/"
+                end
+                Print n
+            end
+        elif o.n > 0
+            console_write(str_from_buffer(o.datos, 0, o.n))
+        end
+        objeto_libre(o)
+        return
+    end
+    id = rev_commit(que)
+    if id == ""
+        aviso("no existe " + que)
+        return
+    end
+    o = objeto_leer(id)
+    if o == nil
+        aviso("no se puede leer el commit " + id)
+        return
+    end
+    escribir_commit(id, o)
+    var ps: [String] = commit_padres(o)
+    objeto_libre(o)
+    if sin_cambios or ps.length > 1
+        return
+    end
+    if log_con_formato and log_formato != ""
+        Print ""
+    end
+    var antes: [EntradaIndice] = []
+    if ps.length == 1
+        antes = ficheros_de_commit(ps[0])
+    end
+    var ahora: [EntradaIndice] = ficheros_de_commit(id)
+    if antes == nil or ahora == nil
+        aviso("falta algún objeto")
+        return
+    end
+    diff_listas(antes, ahora, false, filtro)
 end
 
 func _pasa(r: String, filtro: [String]) -> Bool
