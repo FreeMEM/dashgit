@@ -20,7 +20,7 @@ func uso()
     sal("dashgit " + VERSION + " - git para AmigaOS")
     sal("Versión alfa: aún hay mucho que probar. Ten copia de lo importante.")
     sal("")
-    sal("  dashgit [-C cajón] orden [argumentos]")
+    sal("  dashgit [-C cajón] [--aceptar-cert huella] orden [argumentos]")
     sal("")
     sal("  dashgit init [cajón]")
     sal("  dashgit hash-object [-w] [-t tipo] fichero")
@@ -46,6 +46,7 @@ func uso()
     sal("  dashgit fetch [remoto]")
     sal("  dashgit pull [remoto]                (fusiona si hace falta)")
     sal("  dashgit push [remoto [rama]]")
+    sal("  dashgit certificados [olvidar (número | huella | servidor | --todos)]")
     sal("  dashgit servidor [NOMBRE] [--dueno PUERTO]   (se queda abierto: órdenes por ARexx o ENV:dashgit)")
 end
 
@@ -257,6 +258,8 @@ func ejecutar(orden: String, args: [String])
                 orden_push(args)
             end
         end
+    elif orden == "certificados"
+        orden_certificados(args)
     elif orden == "version" or orden == "--version"
         sal("dashgit " + VERSION)
     else
@@ -545,8 +548,15 @@ Main
     else
         primero = 0
         # -C cajón: como si se ejecutara desde ese cajón (como en git; Forja lo usa)
-        while arg(primero) == "-C" and primero + 1 < arg_count()
-            if not dir_change(arg(primero + 1))
+        # --aceptar-cert huella: acepta ese certificado sin preguntar, solo esta vez (para guiones); se puede repetir
+        while (arg(primero) == "-C" or arg(primero) == "--aceptar-cert") and primero + 1 < arg_count()
+            if arg(primero) == "--aceptar-cert"
+                certs_sin_preguntar = true
+                if not tls_trust(arg(primero + 1))
+                    error("no es una huella SHA-256: " + arg(primero + 1))
+                    program_exit(10)
+                end
+            elif not dir_change(arg(primero + 1))
                 error("no existe el cajón " + arg(primero + 1))
                 program_exit(10)
             end

@@ -31,6 +31,25 @@ Para que duren tras reiniciar, cópialas a `ENVARC:` (`Copy ENV:DASHGIT#? ENVARC
 El token solo se manda por https (hace falta AmiSSL); por http iría sin cifrar y no se manda nunca (salvo a
 127.0.0.1, que no sale del ordenador).
 
+## Certificados que no se pueden comprobar
+
+Si el certificado de un servidor https no se puede comprobar (uno autofirmado, de un servidor propio, uno caducado
+o de otro nombre), dashgit no se conecta. Dice el servidor y el motivo, enseña los datos del certificado (para
+quién es, quién lo emite, sus fechas y su huella SHA-256) y pregunta en el Shell:
+
+    ¿Aceptar este certificado? (s/N)
+
+Por defecto, no. Si se contesta "s", se conecta y lo guarda en `ENVARC:dashgit/certificados`, una línea por
+certificado: huella, servidor y fecha. Desde ahí, ese certificado se acepta siempre, sin preguntar.
+
+    dashgit certificados                     los aceptados, numerados
+    dashgit certificados olvidar 2           olvida uno: por su número, su huella o su servidor
+    dashgit certificados olvidar --todos     olvida todos
+
+En un guion, para aceptarlo sin preguntar: `dashgit --aceptar-cert HUELLA fetch` (va antes de la orden, como `-C`,
+y se puede repetir). Vale solo para esa vez y no se guarda. Con una huella distinta no pregunta: falla y dice la
+huella del certificado que da el servidor.
+
 ## Servidor (para Forja y otros programas)
 
 Arrancar dashgit cuesta casi un segundo en un A1200. `dashgit servidor` se queda abierto y contesta órdenes sin ese
@@ -72,6 +91,7 @@ En FS-UAE, con `DASH_KICKSTART` apuntando a una ROM de Kickstart 3.1:
     tests/stash.sh [cajón de Dash]
     tests/servidor.sh [cajón de Dash]
     tests/fase4.sh [cajón de Dash]     # red, contra un servidor git en el PC
+    tests/certificados.sh [cajón de Dash]   # https con un certificado autofirmado (necesita AmiSSL en el emulador)
 
 ## Licencia
 

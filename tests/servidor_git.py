@@ -6,7 +6,7 @@
 Sirve los repositorios de CAJÓN_RAÍZ en http://127.0.0.1:PUERTO/<nombre> (o en DIRECCIÓN), con push permitido
 (http.receivepack). Las peticiones se apuntan en CAJÓN_RAÍZ/peticiones.txt, con el Host y "auth" si traen
 Authorization. Con chunked=1 en el entorno, contesta en trozos
-(Transfer-Encoding: chunked), como GitHub.
+(Transfer-Encoding: chunked), como GitHub. Con tls=FICHERO.pem (certificado y clave), por https con ese certificado.
 """
 import os
 import subprocess
@@ -68,4 +68,10 @@ class Manejador(BaseHTTPRequestHandler):
     do_POST = _cgi
 
 
-ThreadingHTTPServer((direccion, puerto), Manejador).serve_forever()
+servidor = ThreadingHTTPServer((direccion, puerto), Manejador)
+if os.environ.get("tls"):
+    import ssl
+    contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    contexto.load_cert_chain(os.environ["tls"])
+    servidor.socket = contexto.wrap_socket(servidor.socket, server_side=True)
+servidor.serve_forever()

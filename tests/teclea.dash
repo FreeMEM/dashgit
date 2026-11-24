@@ -1,0 +1,20 @@
+# Ayuda de las pruebas: un usuario que contesta a dashgit en el Shell. Espera arg(0) segundos (60), escribe arg(1)
+# ("s") y Return en la ventana activa, y espera arg(2) segundos más (40) antes de acabar, para las capturas
+Main
+    espera = 60
+    texto = "s"
+    luego = 40
+    if arg_count() > 0
+        espera = Int(arg(0))
+    end
+    if arg_count() > 1
+        texto = arg(1)
+    end
+    if arg_count() > 2
+        luego = Int(arg(2))
+    end
+    time_delay(espera * 50)
+    input_text(texto)
+    input_key(0x44, 0)
+    time_delay(luego * 50)
+end

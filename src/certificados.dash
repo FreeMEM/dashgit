@@ -1,0 +1,187 @@
+# dashgit - certificados que no se pueden comprobar (autofirmados, de un servidor propio...) y que el usuario aceptó
+# Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
+#
+# Si una conexión segura falla por el certificado, dashgit lo enseña y pregunta si se acepta. Los aceptados se
+# guardan en ENVARC:dashgit/certificados, uno por línea: huella SHA-256, servidor y fecha. Se leen (y se aceptan con
+# tls_trust) antes de la primera conexión segura. "dashgit certificados" los enseña y los olvida.
+
+import "util.dash"
+
+const CERTS_FICHERO = "ENVARC:dashgit/certificados"
+
+var certs_cargados: Bool = false
+# Con --aceptar-cert no se pregunta nada (para guiones): se aceptan solo esas huellas
+var certs_sin_preguntar: Bool = false
+
+# Una huella para comparar: sin dos puntos ni espacios, en mayúsculas
+func huella_normal(h: String) -> String
+    return str_upper(str_replace(str_replace(h, ":", ""), " ", ""))
+end
+
+# Las líneas del fichero (huella servidor fecha), sin las vacías
+func certs_leer() -> [String]
+    var r: [String] = []
+    if not file_exists(CERTS_FICHERO)
+        return r
+    end
+    t = file_read_text(CERTS_FICHERO)
+    if t == nil
+        return r
+    end
+    for l in str_split(str_replace(t, "\r", ""), "\n")
+        l2 = str_trim(l)
+        if l2 != "" and not str_starts(l2, "#")
+            r.push(l2)
+        end
+    end
+    return r
+end
+
+func _campo(linea: String, n: Int) -> String
+    var p: [String] = str_split(linea, " ")
+    var c: [String] = []
+    for x in p
+        if x != ""
+            c.push(x)
+        end
+    end
+    if n < c.length
+        return c[n]
+    end
+    return ""
+end
+
+# Acepta los certificados guardados (una vez, antes de la primera conexión segura)
+func certs_cargar()
+    if certs_cargados
+        return
+    end
+    certs_cargados = true
+    for l in certs_leer()
+        tls_trust(_campo(l, 0))
+    end
+end
+
+func _certs_escribir(lineas: [String]) -> Bool
+    if lineas.length == 0
+        if file_exists(CERTS_FICHERO)
+            return file_delete(CERTS_FICHERO)
+        end
+        return true
+    end
+    crear_cajones("ENVARC:dashgit")
+    t = ""
+    for l in lineas
+        t = t + l + "\n"
+    end
+    return file_write_text(CERTS_FICHERO, t)
+end
+
+# Lo guarda para siempre (si no estaba ya)
+func cert_guardar(huella: String, host: String) -> Bool
+    var ls: [String] = certs_leer()
+    for l in ls
+        if huella_normal(_campo(l, 0)) == huella_normal(huella)
+            return true
+        end
+    end
+    ls.push(huella + " " + host + " " + date_text("%Y-%m-%d"))
+    return _certs_escribir(ls)
+end
+
+# La conexión segura con host falló por su certificado (motivo, el de net_error): lo enseña y pregunta si se
+# acepta. true si lo aceptó: ya vale (tls_trust) y está guardado.
+func cert_preguntar(host: String, motivo: String) -> Bool
+    huella = tls_last_fingerprint(host)
+    if huella == ""
+        return false
+    end
+    sal("No se puede comprobar que el servidor " + host + " sea quien dice ser: " + motivo + ". Si lo aceptas y alguien se está haciendo pasar por él, podría ver o cambiar lo que se envía.")
+    sal("")
+    for l in str_split(tls_last_cert(host), "\n")
+        if str_trim(l) != ""
+            sal("  " + a_latin1(l))
+        end
+    end
+    sal("")
+    si = false
+    if not certs_sin_preguntar and not capturar
+        console_flush()
+        console_write("¿Aceptar este certificado? (s/N) ")
+        b = buffer_alloc(84)
+        n = console_read(b, 80)
+        resp = ""
+        if n > 0
+            resp = str_lower(str_trim(str_from_buffer(b, 0, n)))
+        else
+            console_write("\n")
+        end
+        buffer_free(b)
+        si = resp == "s" or resp == "si" or resp == "sí" or resp == "s" + str_char(237) or resp == "y" or resp == "yes"
+    end
+    if not si
+        sal("No se acepta. Para aceptarlo sin preguntar (en un guion): dashgit --aceptar-cert " + huella + " ...")
+        return false
+    end
+    tls_trust(huella)
+    if cert_guardar(huella, host)
+        sal("Aceptado y guardado en " + CERTS_FICHERO + " (dashgit certificados para verlo u olvidarlo).")
+    else
+        sal("Aceptado, pero solo esta vez: no se pudo guardar en " + CERTS_FICHERO + ".")
+    end
+    return true
+end
+
+# ---- dashgit certificados [olvidar (n | huella | servidor | --todos)] ----
+
+func orden_certificados(args: [String])
+    var ls: [String] = certs_leer()
+    if args.length == 0 or args[0] == "lista" or args[0] == "list"
+        if ls.length == 0
+            sal("No hay certificados aceptados.")
+            return
+        end
+        i = 0
+        for l in ls
+            i = i + 1
+            sal("#{i}  " + _campo(l, 0) + "  " + _campo(l, 1) + "  " + _campo(l, 2))
+        end
+        return
+    end
+    if (args[0] != "olvidar" and args[0] != "olvida") or args.length < 2
+        codigo = 10
+        sal("dashgit: uso: certificados [olvidar (número | huella | servidor | --todos)]")
+        return
+    end
+    que = args[1]
+    var quedan: [String] = []
+    var fuera: [String] = []
+    i = 0
+    for l in ls
+        i = i + 1
+        h = _campo(l, 0)
+        if que == "--todos" or que == "#{i}" or huella_normal(que) == huella_normal(h) or str_lower(que) == str_lower(_campo(l, 1))
+            fuera.push(l)
+            tls_untrust(h)
+        else
+            quedan.push(l)
+        end
+    end
+    if fuera.length == 0
+        if que == "--todos"
+            sal("No hay certificados aceptados.")
+        else
+            codigo = 10
+            sal("dashgit: no hay ningún certificado aceptado así: " + que)
+        end
+        return
+    end
+    if not _certs_escribir(quedan)
+        codigo = 10
+        sal("dashgit: no se pudo escribir " + CERTS_FICHERO)
+        return
+    end
+    for l in fuera
+        sal("Olvidado: " + _campo(l, 0) + "  " + _campo(l, 1))
+    end
+end

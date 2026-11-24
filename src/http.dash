@@ -1,7 +1,7 @@
 # dashgit - un cliente HTTP/1.1 sencillo (http y https), para el protocolo de git
 # Copyright (C) 2026 FreeMEM - GPLv2 (ver LICENSE)
 
-import "util.dash"
+import "certificados.dash"
 
 struct Url
     https: Bool = true
@@ -115,19 +115,33 @@ func http_pedir(metodo: String, url: String, tipo: String, cuerpo: Trozo, extra:
         r.error = "no es una dirección http ni https: " + url
         return r
     end
-    sock = net_connect(u.host, u.puerto, 30000)
-    if sock < 0
-        r.error = "no se puede conectar con " + u.host + ": " + net_error()
-        return r
-    end
-    tls = 0
     if u.https
-        tls = tls_connect(sock, u.host)
-        if tls < 0
-            r.error = "TLS con " + u.host + ": " + net_error()
-            net_close(sock)
+        certs_cargar()
+    end
+    sock = -1
+    tls = 0
+    preguntado = false
+    while true
+        sock = net_connect(u.host, u.puerto, 30000)
+        if sock < 0
+            r.error = "no se puede conectar con " + u.host + ": " + net_error()
             return r
         end
+        if not u.https
+            break
+        end
+        tls = tls_connect(sock, u.host)
+        if tls >= 0
+            break
+        end
+        motivo = net_error()
+        net_close(sock)
+        # el certificado no se pudo comprobar: se enseña y, si el usuario lo acepta, otra vez
+        if preguntado or tls_last_fingerprint(u.host) == "" or not cert_preguntar(u.host, motivo)
+            r.error = "TLS con " + u.host + ": " + motivo
+            return r
+        end
+        preguntado = true
     end
     ruta = u.ruta
     if ruta == ""
